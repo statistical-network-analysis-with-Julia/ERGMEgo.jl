@@ -1,40 +1,47 @@
 """
     ERGMEgo.jl - ERGMs for Ego-Centric Network Data
 
-Provides tools for fitting ERGMs to egocentrically sampled network data,
-where we observe a sample of "egos" along with their local networks (alters
-and ties among alters).
+Fits ERGMs to egocentrically sampled network data (a sample of "egos" with
+their local networks: alters and ties among alters), enabling inference
+about complete-network properties from ego samples.
 
-This enables inference about complete network properties from ego samples.
+The methodology follows R `ergm.ego` (Krivitsky & Morris 2017): ego
+statistics are design-weighted and scaled to **target statistics** for a
+pseudo-population network of size `ppopsize`, an ERGM is fit to those
+targets by method-of-moments (MCMC moment matching), and the edges
+coefficient receives the network-size adjustment `−log(popsize/ppopsize)`
+to put it on the population scale. Standard errors combine the model-based
+(inverse-information) and survey-design variance components.
 
 Port of the R ergm.ego package from the StatNet collection.
 """
 module ERGMEgo
 
 using DataFrames
-using Distributions
 using ERGM
 using Graphs
 using LinearAlgebra
 using Network
-using Optim
 using Random
 using Statistics
 using StatsBase
 
+import ERGM: name, compute, summary_stats
+
 # Data structures
-export EgoData, EgoNetwork, EgoSample
+export EgoData, EgoNetwork
+export n_alters, ego_degree, alter_degree, n_alter_ties
 
 # Data preparation
 export as_egodata, ego_design
-export read_ego_data, merge_ego_data
 
-# Ego-specific terms
-export EgoEdges, EgoMixingMatrix, EgoNodeMatch
-export EgoDegree, EgoGWDegree, EgoTriangle
+# Ego-specific terms and statistics
+export EgoEdges, EgoNodeMatch, EgoDegree, EgoGWDegree, EgoTriangle
+export ego_mixing_matrix, ego_target_stats
+export summary_stats
 
 # Estimation
-export ergm_ego, fit_ego_ergm
+export ergm_ego, fit_ego_ergm, EgoERGMModel, EgoERGMResult
 
 # Population size estimation
 export estimate_popsize
@@ -43,7 +50,7 @@ export estimate_popsize
 export simulate_ego_sample
 
 # Diagnostics
-export ego_gof, compare_ego_population
+export ego_gof
 
 # =============================================================================
 # Ego Network Data Structures
@@ -55,12 +62,13 @@ export ego_gof, compare_ego_population
 An ego-centric network observation.
 
 # Fields
-- `ego::T`: Ego vertex ID (or index in sample)
-- `alters::Vector{T}`: Alter vertex IDs
-- `alter_ties::Matrix{Bool}`: Adjacency among alters (not including ego)
+- `ego::T`: Ego ID
+- `alters::Vector{T}`: Alter IDs (original IDs are preserved so that
+  cross-ego alter overlap remains meaningful)
+- `alter_ties::Matrix{Bool}`: Symmetric adjacency among alters (ego not
+  included)
 - `ego_attrs::Dict{Symbol, Any}`: Ego attributes
 - `alter_attrs::Dict{Symbol, Vector}`: Alter attributes (column per attribute)
-- `weights::Vector{Float64}`: Optional weights for alters
 """
 struct EgoNetwork{T}
     ego::T
@@ -68,18 +76,16 @@ struct EgoNetwork{T}
     alter_ties::Matrix{Bool}
     ego_attrs::Dict{Symbol, Any}
     alter_attrs::Dict{Symbol, Vector}
-    weights::Vector{Float64}
 
     function EgoNetwork{T}(ego::T, alters::Vector{T}, alter_ties::Matrix{Bool};
                            ego_attrs::Dict{Symbol,Any}=Dict{Symbol,Any}(),
-                           alter_attrs::Dict{Symbol,Vector}=Dict{Symbol,Vector}(),
-                           weights::Vector{Float64}=Float64[]) where T
+                           alter_attrs::Dict{Symbol,Vector}=Dict{Symbol,Vector}()) where T
         n_alters = length(alters)
         size(alter_ties) == (n_alters, n_alters) ||
             throw(ArgumentError("alter_ties must be $(n_alters)×$(n_alters)"))
-
-        w = isempty(weights) ? ones(n_alters) : weights
-        new{T}(ego, alters, alter_ties, ego_attrs, alter_attrs, w)
+        alter_ties == transpose(alter_ties) ||
+            throw(ArgumentError("alter_ties must be symmetric (undirected)"))
+        new{T}(ego, alters, alter_ties, ego_attrs, alter_attrs)
     end
 end
 
@@ -89,34 +95,30 @@ EgoNetwork(ego::T, alters::Vector{T}, alter_ties::Matrix{Bool}; kwargs...) where
 """
     n_alters(ego_net::EgoNetwork) -> Int
 
-Get the number of alters in an ego network.
+Number of alters in an ego network.
 """
 n_alters(ego_net::EgoNetwork) = length(ego_net.alters)
 
 """
-    alter_degree(ego_net::EgoNetwork) -> Vector{Int}
-
-Get the degree of each alter within the ego network (not counting ego).
-"""
-function alter_degree(ego_net::EgoNetwork)
-    return vec(sum(ego_net.alter_ties, dims=2))
-end
-
-"""
     ego_degree(ego_net::EgoNetwork) -> Int
 
-Get the degree of the ego (number of alters).
+The ego's degree (number of alters).
 """
 ego_degree(ego_net::EgoNetwork) = n_alters(ego_net)
 
 """
+    alter_degree(ego_net::EgoNetwork) -> Vector{Int}
+
+Degree of each alter within the ego network (not counting ego).
+"""
+alter_degree(ego_net::EgoNetwork) = vec(sum(ego_net.alter_ties, dims=2))
+
+"""
     n_alter_ties(ego_net::EgoNetwork) -> Int
 
-Get the number of ties among alters.
+Number of (undirected) ties among alters.
 """
-function n_alter_ties(ego_net::EgoNetwork)
-    return sum(ego_net.alter_ties) ÷ 2  # Assuming undirected
-end
+n_alter_ties(ego_net::EgoNetwork) = sum(ego_net.alter_ties) ÷ 2
 
 """
     EgoData
@@ -126,7 +128,8 @@ Collection of ego networks with sampling information.
 # Fields
 - `egos::Vector{EgoNetwork}`: Individual ego network observations
 - `population_size::Union{Int, Nothing}`: Known or estimated population size
-- `sampling_weights::Vector{Float64}`: Sampling weights for each ego
+- `sampling_weights::Vector{Float64}`: Per-ego sampling weights (design
+  weights, ideally inverse inclusion probabilities)
 - `design::Dict{Symbol, Any}`: Survey design information
 """
 struct EgoData{T}
@@ -141,6 +144,8 @@ struct EgoData{T}
                      design::Dict{Symbol, Any}=Dict{Symbol, Any}()) where T
         n_egos = length(egos)
         sw = isempty(sampling_weights) ? ones(n_egos) : sampling_weights
+        length(sw) == n_egos ||
+            throw(ArgumentError("need one sampling weight per ego"))
         new{T}(egos, population_size, sw, design)
     end
 end
@@ -152,20 +157,20 @@ Base.getindex(ed::EgoData, i) = ed.egos[i]
 """
     summary_stats(ed::EgoData) -> NamedTuple
 
-Summary statistics for ego data.
+Design-weighted summary statistics for ego data.
 """
 function summary_stats(ed::EgoData)
-    n_egos = length(ed.egos)
-    degrees = [ego_degree(e) for e in ed.egos]
-    alter_ties = [n_alter_ties(e) for e in ed.egos]
+    w = Weights(ed.sampling_weights)
+    degrees = [Float64(ego_degree(e)) for e in ed.egos]
+    alter_ties = [Float64(n_alter_ties(e)) for e in ed.egos]
 
     return (
-        n_egos = n_egos,
-        mean_degree = mean(degrees),
+        n_egos = length(ed.egos),
+        mean_degree = mean(degrees, w),
         median_degree = median(degrees),
         min_degree = minimum(degrees),
         max_degree = maximum(degrees),
-        mean_alter_ties = mean(alter_ties),
+        mean_alter_ties = mean(alter_ties, w),
         total_alters = sum(degrees),
         population_size = ed.population_size
     )
@@ -176,263 +181,261 @@ end
 # =============================================================================
 
 """
-    as_egodata(df::DataFrame; ego_col, alter_col, ...) -> EgoData
+    as_egodata(ego_df::DataFrame, alter_df::DataFrame;
+               aatie_df=nothing, kwargs...) -> EgoData
 
-Create EgoData from a DataFrame.
+Create `EgoData` from `ergm.ego`-style data frames:
 
-# Arguments
-- `df`: DataFrame with ego network data
-- `ego_id::Symbol`: Column identifying ego
-- `alter_id::Symbol`: Column identifying alter (if long format)
-- `ego_attrs::Vector{Symbol}`: Columns with ego attributes
-- `alter_attrs::Vector{Symbol}`: Columns with alter attributes
+- `ego_df`: one row per ego (`ego_id` column plus ego attributes)
+- `alter_df`: one row per ego–alter pair (`ego_id`, `alter_id` plus alter
+  attributes)
+- `aatie_df`: optional alter–alter ties, one row per tie with columns
+  `ego_id`, `source_col`, `target_col` (alter IDs)
+
+# Keyword Arguments
+- `ego_id::Symbol=:ego_id`, `alter_id::Symbol=:alter_id`
+- `ego_attrs::Vector{Symbol}=Symbol[]`: Ego attribute columns from `ego_df`
+- `alter_attrs::Vector{Symbol}=Symbol[]`: Alter attribute columns from `alter_df`
+- `weight_col::Union{Symbol,Nothing}=nothing`: Ego sampling-weight column
+  in `ego_df`
+- `source_col::Symbol=:src`, `target_col::Symbol=:dst`: Alter-tie columns
+- `population_size::Union{Int,Nothing}=nothing`
+
+Alter IDs are preserved (not relabeled), so cross-ego alter overlap
+remains available to `estimate_popsize`.
 """
-function as_egodata(df::DataFrame;
+function as_egodata(ego_df::DataFrame, alter_df::DataFrame;
+                    aatie_df::Union{DataFrame, Nothing}=nothing,
                     ego_id::Symbol=:ego_id,
                     alter_id::Symbol=:alter_id,
                     ego_attrs::Vector{Symbol}=Symbol[],
                     alter_attrs::Vector{Symbol}=Symbol[],
-                    tie_col::Symbol=:tie,
-                    weight_col::Union{Symbol, Nothing}=nothing)
-
-    # Group by ego
-    ego_ids = unique(df[!, ego_id])
+                    weight_col::Union{Symbol, Nothing}=nothing,
+                    source_col::Symbol=:src,
+                    target_col::Symbol=:dst,
+                    population_size::Union{Int, Nothing}=nothing)
     egos = EgoNetwork{Int}[]
+    weights = Float64[]
 
-    for (idx, eid) in enumerate(ego_ids)
-        ego_df = filter(row -> row[ego_id] == eid, df)
-
-        # Get alters for this ego
-        alters = unique(ego_df[!, alter_id])
-        n_a = length(alters)
-
-        # Build alter tie matrix (placeholder - needs tie data)
-        alter_ties = zeros(Bool, n_a, n_a)
-
-        # Get ego attributes
-        e_attrs = Dict{Symbol, Any}()
-        for attr in ego_attrs
-            e_attrs[attr] = ego_df[1, attr]
-        end
-
-        # Get alter attributes
-        a_attrs = Dict{Symbol, Vector}()
-        for attr in alter_attrs
-            a_attrs[attr] = ego_df[!, attr]
-        end
-
-        # Weights
-        weights = if !isnothing(weight_col) && weight_col in names(ego_df)
-            ego_df[!, weight_col]
-        else
-            ones(n_a)
-        end
-
-        push!(egos, EgoNetwork(idx, collect(1:n_a), alter_ties;
-                               ego_attrs=e_attrs, alter_attrs=a_attrs, weights=weights))
+    if !isnothing(weight_col) && !(string(weight_col) in names(ego_df))
+        throw(ArgumentError("weight column :$weight_col not found in ego_df"))
     end
 
-    return EgoData(egos)
+    for row in eachrow(ego_df)
+        eid = Int(row[ego_id])
+        a_rows = alter_df[alter_df[!, ego_id] .== eid, :]
+        alters = Int.(a_rows[!, alter_id])
+        n_a = length(alters)
+        alter_index = Dict(a => k for (k, a) in enumerate(alters))
+
+        # Alter-alter ties
+        ties = zeros(Bool, n_a, n_a)
+        if !isnothing(aatie_df)
+            t_rows = aatie_df[aatie_df[!, ego_id] .== eid, :]
+            for t in eachrow(t_rows)
+                a, b = Int(t[source_col]), Int(t[target_col])
+                (haskey(alter_index, a) && haskey(alter_index, b)) ||
+                    throw(ArgumentError("alter tie ($a, $b) of ego $eid references unknown alters"))
+                ties[alter_index[a], alter_index[b]] = true
+                ties[alter_index[b], alter_index[a]] = true
+            end
+        end
+
+        e_attrs = Dict{Symbol, Any}(attr => row[attr] for attr in ego_attrs)
+        a_attrs = Dict{Symbol, Vector}(attr => collect(a_rows[!, attr])
+                                       for attr in alter_attrs)
+
+        push!(egos, EgoNetwork(eid, alters, ties;
+                               ego_attrs=e_attrs, alter_attrs=a_attrs))
+        push!(weights, isnothing(weight_col) ? 1.0 : Float64(row[weight_col]))
+    end
+
+    return EgoData(egos; sampling_weights=weights,
+                   population_size=population_size)
 end
 
 """
-    ego_design(ed::EgoData; ppopsize, weights) -> EgoData
+    ego_design(ed::EgoData; ppopsize=nothing, weights=nothing) -> EgoData
 
-Specify survey design for ego data.
+Attach survey-design information (population size and/or per-ego weights)
+to ego data.
 """
 function ego_design(ed::EgoData{T};
                     ppopsize::Union{Int, Nothing}=nothing,
                     weights::Union{Vector{Float64}, Nothing}=nothing) where T
     new_weights = isnothing(weights) ? ed.sampling_weights : weights
-    design = copy(ed.design)
 
     return EgoData(ed.egos;
-                   population_size=ppopsize,
+                   population_size=something(ppopsize, ed.population_size, Some(nothing)),
                    sampling_weights=new_weights,
-                   design=design)
+                   design=copy(ed.design))
 end
 
 # =============================================================================
-# Ego-Specific ERGM Terms
+# Ego-Specific Terms
 # =============================================================================
+#
+# Each ego term is a per-capita statistic: compute(term, ed) returns the
+# design-weighted mean per-ego contribution h̄. The population target for
+# a network of size m is m·h̄, and each term maps to the ERGM.jl term whose
+# sufficient statistic it estimates:
+#
+#   term            per-ego contribution h_i        ERGM term
+#   EgoEdges        degree_i / 2                    Edges()
+#   EgoNodeMatch    (matching alters)_i / 2         NodeMatch(attr)
+#   EgoTriangle     (alter-alter ties)_i / 3        Triangle()
+#   EgoGWDegree     e^α(1−(1−e^−α)^degree_i)        GWDegree(α)
+#
+# EgoDegree(d) is a descriptive statistic (proportion of egos with degree
+# d); ERGM.jl has no degree-count term, so it cannot be used in ergm_ego.
+
+abstract type EgoTerm <: AbstractERGMTerm end
+
+_wmean(values, weights) = sum(values .* weights) / sum(weights)
 
 """
-    EgoEdges <: AbstractERGMTerm
+    EgoEdges <: EgoTerm
 
-Edge count term for ego data - estimates overall network density.
+Per-capita edge statistic: the design-weighted mean of `degree/2` over
+egos. Scaled by the pseudo-population size this estimates the `edges`
+sufficient statistic.
 """
-struct EgoEdges <: AbstractERGMTerm end
+struct EgoEdges <: EgoTerm end
 
-name(::EgoEdges) = "edges"
+name(::EgoEdges) = "ego.edges"
 
-function compute(::EgoEdges, ed::EgoData)
-    # Weighted average of ego degrees
-    total_degree = sum(ego_degree(e) * w for (e, w) in zip(ed.egos, ed.sampling_weights))
-    total_weight = sum(ed.sampling_weights)
-    return total_degree / total_weight
-end
+_ego_contribution(::EgoEdges, e::EgoNetwork) = ego_degree(e) / 2
 
 """
-    EgoNodeMatch <: AbstractERGMTerm
+    EgoNodeMatch(attr) <: EgoTerm
 
-Homophily term based on matching node attributes.
+Per-capita homophily statistic: the design-weighted mean of half the
+number of alters whose `attr` matches the ego's. Estimates the
+`nodematch(attr)` sufficient statistic.
 """
-struct EgoNodeMatch <: AbstractERGMTerm
+struct EgoNodeMatch <: EgoTerm
     attr::Symbol
-    EgoNodeMatch(attr::Symbol) = new(attr)
 end
 
-name(t::EgoNodeMatch) = "nodematch.$(t.attr)"
+name(t::EgoNodeMatch) = "ego.nodematch.$(t.attr)"
 
-function compute(t::EgoNodeMatch, ed::EgoData)
-    total = 0.0
-    total_weight = 0.0
-
-    for (ego_net, w) in zip(ed.egos, ed.sampling_weights)
-        ego_val = get(ego_net.ego_attrs, t.attr, nothing)
-        isnothing(ego_val) && continue
-
-        alter_vals = get(ego_net.alter_attrs, t.attr, nothing)
-        isnothing(alter_vals) && continue
-
-        # Count matches between ego and alters
-        matches = count(av -> av == ego_val, alter_vals)
-        total += matches * w
-        total_weight += w
-    end
-
-    return total_weight > 0 ? total / total_weight : 0.0
+function _ego_contribution(t::EgoNodeMatch, e::EgoNetwork)
+    haskey(e.ego_attrs, t.attr) || return 0.0
+    haskey(e.alter_attrs, t.attr) || return 0.0
+    ego_val = e.ego_attrs[t.attr]
+    return count(==(ego_val), e.alter_attrs[t.attr]) / 2
 end
 
 """
-    EgoDegree <: AbstractERGMTerm
+    EgoTriangle <: EgoTerm
 
-Degree distribution term for ego data.
+Per-capita triangle statistic: the design-weighted mean of
+`(alter–alter ties)/3` (each population triangle appears in the local view
+of each of its three vertices). Estimates the `triangle` sufficient
+statistic.
 """
-struct EgoDegree <: AbstractERGMTerm
-    d::Union{Int, Nothing}  # Specific degree, or nothing for all
+struct EgoTriangle <: EgoTerm end
 
-    EgoDegree(d::Union{Int, Nothing}=nothing) = new(d)
-end
+name(::EgoTriangle) = "ego.triangle"
 
-name(t::EgoDegree) = isnothing(t.d) ? "degree" : "degree.$(t.d)"
-
-function compute(t::EgoDegree, ed::EgoData)
-    if isnothing(t.d)
-        # Return mean degree
-        total = sum(ego_degree(e) * w for (e, w) in zip(ed.egos, ed.sampling_weights))
-        return total / sum(ed.sampling_weights)
-    else
-        # Count egos with specific degree
-        count = sum(w for (e, w) in zip(ed.egos, ed.sampling_weights) if ego_degree(e) == t.d)
-        return count / sum(ed.sampling_weights)
-    end
-end
+_ego_contribution(::EgoTriangle, e::EgoNetwork) = n_alter_ties(e) / 3
 
 """
-    EgoGWDegree <: AbstractERGMTerm
+    EgoGWDegree(decay) <: EgoTerm
 
-Geometrically weighted degree for ego data.
+Per-capita geometrically weighted degree: the design-weighted mean of
+`e^α(1 − (1 − e^{−α})^degree)`. Estimates the `gwdegree(decay, fixed=TRUE)`
+sufficient statistic.
 """
-struct EgoGWDegree <: AbstractERGMTerm
+struct EgoGWDegree <: EgoTerm
     decay::Float64
-    EgoGWDegree(decay::Float64=0.5) = new(decay)
-end
 
-name(t::EgoGWDegree) = "gwdegree.$(t.decay)"
-
-function compute(t::EgoGWDegree, ed::EgoData)
-    total = 0.0
-    total_weight = 0.0
-
-    for (ego_net, w) in zip(ed.egos, ed.sampling_weights)
-        d = ego_degree(ego_net)
-        # GWD contribution
-        if d > 0
-            contribution = exp(t.decay) * (1 - (1 - exp(-t.decay))^d)
-            total += contribution * w
-        end
-        total_weight += w
-    end
-
-    return total_weight > 0 ? total / total_weight : 0.0
-end
-
-"""
-    EgoTriangle <: AbstractERGMTerm
-
-Triangle count from ego data (based on alter-alter ties).
-"""
-struct EgoTriangle <: AbstractERGMTerm end
-
-name(::EgoTriangle) = "triangle"
-
-function compute(::EgoTriangle, ed::EgoData)
-    total = 0.0
-    total_weight = 0.0
-
-    for (ego_net, w) in zip(ed.egos, ed.sampling_weights)
-        # Triangles = alter-alter ties (each tie with ego forms a triangle)
-        triangles = n_alter_ties(ego_net)
-        total += triangles * w
-        total_weight += w
-    end
-
-    return total_weight > 0 ? total / total_weight : 0.0
-end
-
-"""
-    EgoMixingMatrix <: AbstractERGMTerm
-
-Mixing matrix term - cross-tabulation of ego-alter attributes.
-"""
-struct EgoMixingMatrix <: AbstractERGMTerm
-    attr::Symbol
-    levels::Vector{Any}
-
-    function EgoMixingMatrix(attr::Symbol; levels::Vector=Any[])
-        new(attr, levels)
+    function EgoGWDegree(decay::Float64=0.5)
+        decay > 0 || throw(ArgumentError("decay must be positive"))
+        new(decay)
     end
 end
 
-name(t::EgoMixingMatrix) = "mixing.$(t.attr)"
+name(t::EgoGWDegree) = "ego.gwdegree.$(t.decay)"
 
-function compute(t::EgoMixingMatrix, ed::EgoData)
-    # Build mixing matrix
-    levels = if isempty(t.levels)
-        # Infer levels from data
-        all_vals = Any[]
-        for ego_net in ed.egos
-            push!(all_vals, get(ego_net.ego_attrs, t.attr, missing))
-            append!(all_vals, get(ego_net.alter_attrs, t.attr, []))
-        end
-        unique(filter(!ismissing, all_vals))
-    else
-        t.levels
+function _ego_contribution(t::EgoGWDegree, e::EgoNetwork)
+    d = ego_degree(e)
+    α = t.decay
+    return d > 0 ? exp(α) * (1 - (1 - exp(-α))^d) : 0.0
+end
+
+"""
+    EgoDegree(d) <: EgoTerm
+
+Descriptive statistic: the design-weighted proportion of egos with degree
+exactly `d`. Not usable in `ergm_ego` (ERGM.jl has no degree-count term).
+"""
+struct EgoDegree <: EgoTerm
+    d::Int
+end
+
+name(t::EgoDegree) = "ego.degree.$(t.d)"
+
+_ego_contribution(t::EgoDegree, e::EgoNetwork) = Float64(ego_degree(e) == t.d)
+
+"""
+    compute(term::EgoTerm, ed::EgoData) -> Float64
+
+The design-weighted mean per-ego contribution of the term (a per-capita
+statistic; multiply by a network size to get a target sufficient
+statistic — see [`ego_target_stats`](@ref)).
+"""
+function compute(term::EgoTerm, ed::EgoData)
+    h = [_ego_contribution(term, e) for e in ed.egos]
+    return _wmean(h, ed.sampling_weights)
+end
+
+"""
+    ego_mixing_matrix(ed::EgoData, attr::Symbol) -> (levels, matrix)
+
+Design-weighted ego–alter mixing counts for a categorical attribute:
+`matrix[a, b]` is the weighted number of ego–alter pairs with ego level
+`levels[a]` and alter level `levels[b]`.
+"""
+function ego_mixing_matrix(ed::EgoData, attr::Symbol)
+    levels = Any[]
+    for e in ed.egos
+        haskey(e.ego_attrs, attr) && push!(levels, e.ego_attrs[attr])
+        haskey(e.alter_attrs, attr) && append!(levels, e.alter_attrs[attr])
     end
+    levels = sort(unique(levels))
+    index = Dict(l => k for (k, l) in enumerate(levels))
 
-    n_levels = length(levels)
-    mixing = zeros(n_levels, n_levels)
-
-    for (ego_net, w) in zip(ed.egos, ed.sampling_weights)
-        ego_val = get(ego_net.ego_attrs, t.attr, nothing)
-        isnothing(ego_val) && continue
-
-        ego_idx = findfirst(==(ego_val), levels)
-        isnothing(ego_idx) && continue
-
-        alter_vals = get(ego_net.alter_attrs, t.attr, nothing)
-        isnothing(alter_vals) && continue
-
-        for av in alter_vals
-            alter_idx = findfirst(==(av), levels)
-            isnothing(alter_idx) && continue
-            mixing[ego_idx, alter_idx] += w
+    mix = zeros(length(levels), length(levels))
+    for (e, w) in zip(ed.egos, ed.sampling_weights)
+        (haskey(e.ego_attrs, attr) && haskey(e.alter_attrs, attr)) || continue
+        a = index[e.ego_attrs[attr]]
+        for v in e.alter_attrs[attr]
+            mix[a, index[v]] += w
         end
     end
 
-    return sum(mixing)  # Return total for now; could return matrix
+    return (levels=levels, matrix=mix)
 end
+
+# Mapping from ego terms to the ERGM terms whose sufficient statistics
+# they estimate
+_ergm_term(::EgoEdges) = Edges()
+_ergm_term(t::EgoNodeMatch) = NodeMatch(t.attr)
+_ergm_term(::EgoTriangle) = Triangle()
+_ergm_term(t::EgoGWDegree) = GWDegree(t.decay)
+_ergm_term(t::EgoTerm) =
+    throw(ArgumentError("$(name(t)) is a descriptive statistic with no " *
+                        "ERGM.jl counterpart; it cannot be used in ergm_ego"))
+
+"""
+    ego_target_stats(terms, ed::EgoData, m::Int) -> Vector{Float64}
+
+Target sufficient statistics for a network of size `m`: `m` times the
+design-weighted per-capita ego statistics.
+"""
+ego_target_stats(terms, ed::EgoData, m::Int) =
+    [m * compute(t, ed) for t in terms]
 
 # =============================================================================
 # Model and Estimation
@@ -441,146 +444,283 @@ end
 """
     EgoERGMModel
 
-ERGM model for ego-centric data.
+Specification of an egocentric ERGM fit: ego terms, their ERGM
+counterparts, the pseudo-population network, and target statistics.
 """
 struct EgoERGMModel
-    terms::Vector{AbstractERGMTerm}
+    ego_terms::Vector{EgoTerm}
+    ergm_terms::Vector{AbstractERGMTerm}
     data::EgoData
     ppopsize::Int
+    popsize::Int
+    targets::Vector{Float64}
 end
 
 """
     EgoERGMResult
 
-Results from fitting an ego ERGM.
+Results from `ergm_ego`.
+
+# Fields
+- `coefficients`: Population-scale coefficients (the edges coefficient
+  includes the network-size adjustment `−log(popsize/ppopsize)`)
+- `std_errors`: Standard errors combining the model-based and
+  survey-design variance components
+- `netsize_adjustment`: The `−log(popsize/ppopsize)` adjustment applied to
+  the edges coefficient
+- `converged`: Whether moment matching converged
+- `sim_stats`: Statistics sampled at the fitted coefficients (pseudo-
+  population scale)
 """
 struct EgoERGMResult
     model::EgoERGMModel
     coefficients::Vector{Float64}
     std_errors::Vector{Float64}
-    loglik::Float64
+    netsize_adjustment::Float64
     converged::Bool
+    sim_stats::Matrix{Float64}
 end
 
 function Base.show(io::IO, result::EgoERGMResult)
-    println(io, "Ego ERGM Results")
-    println(io, "================")
-    println(io, "Population size: $(result.model.ppopsize)")
-    println(io, "Sample size: $(length(result.model.data))")
-    println(io, "Log-likelihood: $(round(result.loglik, digits=4))")
+    println(io, "Egocentric ERGM Results")
+    println(io, "=======================")
+    println(io, "Egos: $(length(result.model.data)); pseudo-population: " *
+                "$(result.model.ppopsize); population: $(result.model.popsize)")
+    println(io, "Netsize adjustment (edges): $(round(result.netsize_adjustment, digits=4))")
     println(io, "Converged: $(result.converged)")
     println(io)
-    println(io, "Coefficients:")
-    for (i, term) in enumerate(result.model.terms)
-        println(io, "  $(rpad(name(term), 20)) $(lpad(round(result.coefficients[i], digits=4), 10)) " *
+    println(io, "Coefficients (population scale):")
+    for (i, term) in enumerate(result.model.ego_terms)
+        println(io, "  $(rpad(name(term), 24)) $(lpad(round(result.coefficients[i], digits=4), 10)) " *
                     "(SE: $(round(result.std_errors[i], digits=4)))")
     end
 end
 
-"""
-    ergm_ego(data::EgoData, terms; ppopsize, kwargs...) -> EgoERGMResult
+# Build the pseudo-population network: m vertices whose attributes are
+# ego attributes replicated proportionally to the sampling weights, with
+# edges seeded at the target density
+function _pseudo_population(ed::EgoData, m::Int, target_density::Float64,
+                            rng::Random.AbstractRNG)
+    net = network(m; directed=false)
 
-Fit an ERGM from ego-centric network data.
+    # Replicate egos proportionally to weight (largest-remainder rounding)
+    n_egos = length(ed.egos)
+    w = ed.sampling_weights ./ sum(ed.sampling_weights)
+    counts = floor.(Int, w .* m)
+    remainder = m - sum(counts)
+    order = sortperm(w .* m .- counts; rev=true)
+    for k in 1:remainder
+        counts[order[k]] += 1
+    end
 
-# Arguments
-- `data`: EgoData object
-- `terms`: Vector of ERGM terms
-- `ppopsize`: Pseudo-population size for inference
+    # Assign ego attributes to pseudo-population vertices
+    attrs = Dict{Symbol, Dict{Int, Any}}()
+    v = 0
+    for (i, e) in enumerate(ed.egos)
+        for _ in 1:counts[i]
+            v += 1
+            for (attr, val) in e.ego_attrs
+                get!(attrs, attr, Dict{Int, Any}())[v] = val
+            end
+        end
+    end
+    for (attr, vals) in attrs
+        set_vertex_attribute!(net, attr, vals)
+    end
+
+    # Seed edges at approximately the target density
+    p = clamp(target_density, 1e-4, 0.5)
+    for i in 1:m, j in (i+1):m
+        rand(rng) < p && add_edge!(net, i, j)
+    end
+
+    return net
+end
+
 """
-function ergm_ego(data::EgoData, terms::Vector{<:AbstractERGMTerm};
+    ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm}; kwargs...) -> EgoERGMResult
+
+Fit an ERGM to egocentrically sampled data, following `ergm.ego`:
+
+1. Compute design-weighted **target statistics** scaled to a
+   pseudo-population of size `ppopsize`.
+2. Build a pseudo-population network with ego attributes replicated
+   proportionally to the sampling weights.
+3. Fit coefficients by **MCMC moment matching** (Newton iterations on
+   `targets − E_θ[g]`, the method-of-moments estimator that `ergm` uses
+   for `target.stats`).
+4. Apply the **network-size adjustment** `−log(popsize/ppopsize)` to the
+   edges coefficient so it is on the population scale.
+
+Standard errors combine the inverse-information (model) component with the
+survey-design variance of the targets:
+`V(θ̂) = I⁻¹ + I⁻¹ Σ_design I⁻¹`.
+
+# Keyword Arguments
+- `ppopsize::Int`: Pseudo-population size (default: `popsize` if known and
+  ≤ 1000, otherwise `10 ×` the number of egos)
+- `popsize::Union{Int,Nothing}`: Population size for the offset (default:
+  `ed.population_size`, falling back to `ppopsize`, i.e. no adjustment)
+- `n_samples, burnin, interval, max_iter, tol`: MCMC moment-matching controls
+- `rng`: Random number generator
+"""
+function ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
                   ppopsize::Union{Int, Nothing}=nothing,
-                  method::Symbol=:mple,
-                  maxiter::Int=100)
+                  popsize::Union{Int, Nothing}=nothing,
+                  n_samples::Int=400,
+                  burnin::Int=2000,
+                  interval::Int=20,
+                  max_iter::Int=25,
+                  tol::Float64=0.05,
+                  rng::Random.AbstractRNG=Random.default_rng())
+    isempty(terms) && throw(ArgumentError("need at least one term"))
+    any(t -> t isa EgoEdges, terms) ||
+        throw(ArgumentError("the model must include EgoEdges() (as ergm.ego models include edges)"))
 
-    # Use provided ppopsize or estimate
-    pop_size = if !isnothing(ppopsize)
+    N = something(popsize, ed.population_size, Some(nothing))
+    m = if !isnothing(ppopsize)
         ppopsize
-    elseif !isnothing(data.population_size)
-        data.population_size
+    elseif !isnothing(N) && N <= 1000
+        N
     else
-        # Estimate from data
-        estimate_popsize(data)
+        10 * length(ed.egos)
     end
+    N = something(N, m)
+    m >= 5 || throw(ArgumentError("pseudo-population size too small"))
 
-    model = EgoERGMModel(terms, data, pop_size)
+    ego_terms = collect(EgoTerm, terms)
+    ergm_terms = AbstractERGMTerm[_ergm_term(t) for t in ego_terms]
+    p = length(ego_terms)
 
-    if method == :mple
-        return ego_mple(model; maxiter=maxiter)
-    else
-        throw(ArgumentError("Unknown method: $method"))
-    end
-end
+    # Target statistics on the pseudo-population scale
+    targets = ego_target_stats(ego_terms, ed, m)
 
-fit_ego_ergm = ergm_ego
+    edges_idx = findfirst(t -> t isa EgoEdges, ego_terms)
+    n_dyads = m * (m - 1) / 2
+    target_density = targets[edges_idx] / n_dyads
+    target_density < 1 ||
+        throw(ArgumentError("target mean degree implies density ≥ 1; increase ppopsize"))
 
-"""
-    ego_mple(model::EgoERGMModel; kwargs...) -> EgoERGMResult
+    net = _pseudo_population(ed, m, target_density, rng)
+    model = ERGMModel(ERGMFormula(ergm_terms), net)
 
-MPLE for ego ERGM.
-"""
-function ego_mple(model::EgoERGMModel; maxiter::Int=100, tol::Float64=1e-6)
-    n_terms = length(model.terms)
-    coef = zeros(n_terms)
+    # Initialize: edges at logit of target density, others at 0
+    θ = zeros(p)
+    θ[edges_idx] = log(target_density / (1 - target_density))
 
-    # Compute observed statistics
-    obs_stats = [compute(term, model.data) for term in model.terms]
+    # MCMC moment matching (Newton on targets − E[g])
+    converged = false
+    samples = Matrix{Float64}(undef, 0, p)
+    for iter in 1:max_iter
+        samples = ERGM._mcmc_sample(model, θ, n_samples, burnin, interval)
+        mean_stats = vec(mean(samples, dims=1))
+        diff = targets .- mean_stats
 
-    # Gradient descent optimization
-    for iter in 1:maxiter
-        grad = zeros(n_terms)
-
-        # Approximate gradient
-        for (i, term) in enumerate(model.terms)
-            # Simplified gradient computation
-            grad[i] = obs_stats[i] - obs_stats[i] * sigmoid(-coef[i])
+        if maximum(abs.(diff) ./ max.(abs.(targets), 1.0)) < tol
+            converged = true
+            break
         end
 
-        # Update with step size
-        step_size = 0.1 / sqrt(iter)
-        coef .+= step_size * grad
-
-        if maximum(abs.(grad)) < tol
-            # Compute approximate standard errors
-            se = fill(0.1, n_terms)  # Placeholder
-            return EgoERGMResult(model, coef, se, NaN, true)
+        cov_stats = cov(samples)
+        step = try
+            cov_stats \ diff
+        catch
+            break
         end
+        # Damp large steps for stability
+        maxstep = maximum(abs.(step))
+        maxstep > 1.0 && (step .*= 1.0 / maxstep)
+        θ .+= step
     end
 
-    se = fill(NaN, n_terms)
-    return EgoERGMResult(model, coef, se, NaN, false)
+    # Final sample at the fitted coefficients
+    samples = ERGM._mcmc_sample(model, θ, n_samples, burnin, interval)
+
+    # Variance: model component I⁻¹ plus design component I⁻¹ Σ_t I⁻¹,
+    # where Σ_t is the survey variance of the target statistics
+    I_mat = cov(samples)
+    Σ_t = _design_cov(ego_terms, ed, m)
+    vcov_θ = try
+        Iinv = inv(Symmetric(I_mat))
+        Matrix(Iinv) .+ Matrix(Iinv) * Σ_t * Matrix(Iinv)
+    catch
+        fill(NaN, p, p)
+    end
+    se = sqrt.(abs.(diag(vcov_θ)))
+
+    # Network-size adjustment: put the edges coefficient on the
+    # population (size N) scale
+    adjustment = -log(N / m)
+    coefficients = copy(θ)
+    coefficients[edges_idx] += adjustment
+
+    ego_model = EgoERGMModel(ego_terms, ergm_terms, ed, m, N, targets)
+    return EgoERGMResult(ego_model, coefficients, se, adjustment, converged, samples)
 end
 
-sigmoid(x) = 1.0 / (1.0 + exp(-x))
+const fit_ego_ergm = ergm_ego
+
+# Survey-design covariance of the target statistics: targets are
+# m·(weighted mean of per-ego contributions), so
+# V(target) = m² · V_w(h̄) with the standard weighted-mean variance
+function _design_cov(terms, ed::EgoData, m::Int)
+    n = length(ed.egos)
+    p = length(terms)
+    w = ed.sampling_weights ./ sum(ed.sampling_weights)
+
+    H = Matrix{Float64}(undef, n, p)
+    for (j, t) in enumerate(terms), (i, e) in enumerate(ed.egos)
+        H[i, j] = _ego_contribution(t, e)
+    end
+    h̄ = vec(sum(H .* w, dims=1))
+
+    Σ = zeros(p, p)
+    for i in 1:n
+        d = H[i, :] .- h̄
+        Σ .+= (w[i]^2) .* (d * d')
+    end
+    return (m^2) .* Σ
+end
 
 # =============================================================================
 # Population Size Estimation
 # =============================================================================
 
 """
-    estimate_popsize(ed::EgoData; method=:horvitz_thompson) -> Int
+    estimate_popsize(ed::EgoData; method=:horvitz_thompson) -> Float64
 
-Estimate population size from ego data.
+Estimate the population size from an ego sample.
+
+- `:horvitz_thompson`: The sum of the sampling weights. Only meaningful
+  when the weights are inverse inclusion probabilities; with unit weights
+  this is just the number of egos.
+- `:capture_recapture`: Two-sample Lincoln–Petersen using alter overlap —
+  the egos are split in half; with `n₁`/`n₂` the distinct alters named in
+  each half and `m` the overlap, `N̂ = n₁·n₂/m`. Requires globally
+  meaningful alter IDs (preserved by `as_egodata`).
 """
 function estimate_popsize(ed::EgoData; method::Symbol=:horvitz_thompson)
     if method == :horvitz_thompson
-        # Horvitz-Thompson estimator based on sampling weights
-        return round(Int, sum(ed.sampling_weights))
+        return sum(ed.sampling_weights)
     elseif method == :capture_recapture
-        # Simple capture-recapture based on alter overlap
-        # Count unique alters weighted by appearance frequency
-        alter_counts = Dict{Int, Int}()
-        for ego_net in ed.egos
-            for a in ego_net.alters
-                alter_counts[a] = get(alter_counts, a, 0) + 1
+        n = length(ed.egos)
+        n >= 2 || throw(ArgumentError("need at least two egos"))
+        half = n ÷ 2
+        s1 = Set{Int}()
+        s2 = Set{Int}()
+        for (i, e) in enumerate(ed.egos)
+            target = i <= half ? s1 : s2
+            for a in e.alters
+                push!(target, Int(a))
             end
         end
-
-        n_unique = length(alter_counts)
-        n_total = sum(values(alter_counts))
-
-        # Lincoln-Petersen estimate
-        n_sample = length(ed.egos)
-        return round(Int, n_sample * n_unique / (n_total / n_sample))
+        (isempty(s1) || isempty(s2)) &&
+            throw(ArgumentError("both halves must contain alters"))
+        overlap = length(intersect(s1, s2))
+        overlap > 0 ||
+            throw(ArgumentError("no alter overlap between sample halves; " *
+                                "capture-recapture requires shared alter IDs"))
+        return length(s1) * length(s2) / overlap
     else
         throw(ArgumentError("Unknown method: $method"))
     end
@@ -591,44 +731,45 @@ end
 # =============================================================================
 
 """
-    simulate_ego_sample(net::Network, n_egos::Int; kwargs...) -> EgoData
+    simulate_ego_sample(net::Network, n_egos::Int;
+                        ego_attrs=Symbol[], rng=Random.default_rng()) -> EgoData
 
-Simulate an ego sample from a complete network.
+Draw an egocentric sample from a complete (undirected) network: sample
+`n_egos` egos uniformly without replacement and record each ego's alters,
+the ties among those alters, and the requested vertex attributes for ego
+and alters. Alter IDs are the network's vertex IDs.
 """
-function simulate_ego_sample(net::Network{T}, n_egos::Int;
-                             with_replacement::Bool=false,
-                             include_alter_ties::Bool=true) where T
-    n = nv(net)
-    n_egos <= n || throw(ArgumentError("n_egos cannot exceed network size"))
+function simulate_ego_sample(net, n_egos::Int;
+                             ego_attrs::Vector{Symbol}=Symbol[],
+                             rng::Random.AbstractRNG=Random.default_rng())
+    n = Int(nv(net))
+    n_egos <= n || throw(ArgumentError("cannot sample more egos than vertices"))
 
-    # Sample egos
-    ego_ids = sample(1:n, n_egos; replace=with_replacement)
-    egos = EgoNetwork{T}[]
+    ego_ids = sample(rng, 1:n, n_egos; replace=false)
+    egos = EgoNetwork{Int}[]
 
-    for (idx, ego_id) in enumerate(ego_ids)
-        # Get alters (neighbors of ego)
-        alters = collect(neighbors(net, ego_id))
+    for eid in ego_ids
+        alters = sort(collect(neighbors(net, eid)))
+        n_a = length(alters)
 
-        if isempty(alters)
-            alter_ties = zeros(Bool, 0, 0)
-        else
-            # Build alter tie matrix
-            n_a = length(alters)
-            alter_ties = zeros(Bool, n_a, n_a)
-
-            if include_alter_ties
-                for (i, a1) in enumerate(alters)
-                    for (j, a2) in enumerate(alters)
-                        if i < j && has_edge(net, a1, a2)
-                            alter_ties[i, j] = true
-                            alter_ties[j, i] = true
-                        end
-                    end
-                end
+        ties = zeros(Bool, n_a, n_a)
+        for a in 1:n_a, b in (a+1):n_a
+            if has_edge(net, alters[a], alters[b])
+                ties[a, b] = true
+                ties[b, a] = true
             end
         end
 
-        push!(egos, EgoNetwork(T(idx), T.(collect(1:length(alters))), alter_ties))
+        e_attrs = Dict{Symbol, Any}()
+        a_attrs = Dict{Symbol, Vector}()
+        for attr in ego_attrs
+            vals = get_vertex_attribute(net, attr)
+            haskey(vals, eid) && (e_attrs[attr] = vals[eid])
+            a_attrs[attr] = [get(vals, a, missing) for a in alters]
+        end
+
+        push!(egos, EgoNetwork(Int(eid), Int.(alters), ties;
+                               ego_attrs=e_attrs, alter_attrs=a_attrs))
     end
 
     return EgoData(egos; population_size=n)
@@ -639,24 +780,51 @@ end
 # =============================================================================
 
 """
-    ego_gof(result::EgoERGMResult; statistics) -> NamedTuple
+    ego_gof(result::EgoERGMResult; n_sim=50, rng=Random.default_rng()) -> NamedTuple
 
-Goodness-of-fit for ego ERGM.
+Goodness of fit for an egocentric ERGM: simulate pseudo-population
+networks at the fitted (pseudo-population scale) coefficients, take ego
+samples of the observed size from each, and compare the observed
+design-weighted mean degree and mean alter-tie count against their
+simulated distributions (two-sided Monte Carlo p-values).
 """
-function ego_gof(result::EgoERGMResult;
-                 statistics::Vector{Symbol}=[:degree, :esp])
-    # Compare observed ego statistics to model expectations
-    obs_stats = Dict{Symbol, Float64}()
+function ego_gof(result::EgoERGMResult; n_sim::Int=50,
+                 rng::Random.AbstractRNG=Random.default_rng())
+    model = result.model
+    ed = model.data
+    m = model.ppopsize
+    n_egos = length(ed)
 
-    for stat in statistics
-        if stat == :degree
-            obs_stats[:degree] = mean(ego_degree(e) for e in result.model.data.egos)
-        elseif stat == :alter_ties
-            obs_stats[:alter_ties] = mean(n_alter_ties(e) for e in result.model.data.egos)
-        end
+    # Coefficients on the pseudo-population scale (undo the adjustment)
+    θ = copy(result.coefficients)
+    edges_idx = findfirst(t -> t isa EgoEdges, model.ego_terms)
+    θ[edges_idx] -= result.netsize_adjustment
+
+    net = _pseudo_population(ed, m, model.targets[edges_idx] / (m * (m - 1) / 2), rng)
+    ergm_model = ERGMModel(ERGMFormula(model.ergm_terms), net)
+    sims = sample_networks(ergm_model, θ; n_sim=n_sim, burnin=2000, interval=200)
+
+    obs = summary_stats(ed)
+    sim_mean_degree = Float64[]
+    sim_mean_aaties = Float64[]
+    for s in sims
+        sample_ed = simulate_ego_sample(s, min(n_egos, Int(nv(s))); rng=rng)
+        ss = summary_stats(sample_ed)
+        push!(sim_mean_degree, ss.mean_degree)
+        push!(sim_mean_aaties, ss.mean_alter_ties)
     end
 
-    return (observed=obs_stats,)
+    mc_p = (sim, o) -> min(1.0, 2.0 * min(mean(sim .>= o), mean(sim .<= o)))
+
+    return (
+        observed = (mean_degree = obs.mean_degree,
+                    mean_alter_ties = obs.mean_alter_ties),
+        simulated = (mean_degree = mean(sim_mean_degree),
+                     mean_alter_ties = mean(sim_mean_aaties)),
+        p_values = (mean_degree = mc_p(sim_mean_degree, obs.mean_degree),
+                    mean_alter_ties = mc_p(sim_mean_aaties, obs.mean_alter_ties)),
+        n_sim = n_sim
+    )
 end
 
 end # module

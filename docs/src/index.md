@@ -40,6 +40,12 @@ Pages = [
 Depth = 2
 ```
 
+## Package overview
+
+```@docs
+ERGMEgo.ERGMEgo
+```
+
 ## References
 
 1. Krivitsky, P.N. & Morris, M. (2017). Inference for social network

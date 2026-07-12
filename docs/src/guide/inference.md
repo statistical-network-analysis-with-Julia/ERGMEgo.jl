@@ -9,7 +9,8 @@ per-ego contribution. This is what `ergm.ego` passes to `ergm` as
 
 ## Pseudo-population and moment matching
 
-`ergm_ego` builds an undirected network of `ppopsize` vertices whose
+[`fit_ergm_ego`](@ref) (alias [`ergm_ego`](@ref)) builds an undirected
+network of `ppopsize` vertices whose
 attributes replicate the egos proportionally to the sampling weights
 (largest-remainder rounding), seeds it near the target density, and then
 iterates Newton steps
@@ -34,7 +35,7 @@ pseudo-population of size `ppopsize` while targeting a population of size
 \theta_{edges}^{pop} = \hat\theta_{edges} - \log(popsize / ppopsize),
 ```
 
-which `ergm_ego` applies to the reported coefficient (stored in
+which `fit_ergm_ego` applies to the reported coefficient (stored in
 `netsize_adjustment`). With `popsize == ppopsize` the adjustment is 0.
 
 ## Variance
@@ -53,7 +54,9 @@ increase `n_samples` for more stable standard errors.
 
 ## Goodness of fit
 
-[`ego_gof`](@ref) simulates pseudo-population networks at the fitted
-coefficients, draws ego samples of the observed size, and compares the
-observed design-weighted mean degree and mean alter-tie count to their
-simulated distributions with two-sided Monte Carlo p-values.
+[`gof`](@ref) — a method of the shared `Network.gof` generic returning
+the shared `Network.GOFResult` — simulates pseudo-population networks at
+the fitted coefficients, draws ego samples of the observed size, and
+compares the observed design-weighted mean degree and mean alter-tie
+count to their simulated distributions with two-sided Monte Carlo
+p-values. [`ego_gof`](@ref) is the legacy NamedTuple-returning form.

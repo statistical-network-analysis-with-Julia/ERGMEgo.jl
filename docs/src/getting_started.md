@@ -59,13 +59,17 @@ With a census ego sample the scaling is exact:
 ## Fitting
 
 ```julia
-result = ergm_ego(ed, [EgoEdges(), EgoNodeMatch(:group)];
-                  ppopsize = 200, popsize = 1000)
+result = fit_ergm_ego(ed, [EgoEdges(), EgoNodeMatch(:group)];
+                      ppopsize = 200, popsize = 1000)
 println(result)
 
-# Model checking
-ego_gof(result)
+# Model checking: gof returns the shared Network.GOFResult
+gof(result)
 ```
+
+`ergm_ego` is an R-faithful alias for `fit_ergm_ego` (and `fit_ego_ergm`
+a legacy one); `ego_gof` is the legacy NamedTuple-returning form of
+`gof`.
 
 The reported edges coefficient is on the *population* scale — the
 `−log(popsize/ppopsize)` adjustment is already applied (and reported in

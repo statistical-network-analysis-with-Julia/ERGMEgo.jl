@@ -470,7 +470,7 @@ end
 """
     EgoERGMResult
 
-Results from `ergm_ego`.
+Results from [`fit_ergm_ego`](@ref).
 
 # Fields
 - `coefficients`: Population-scale coefficients (the edges coefficient
@@ -563,7 +563,7 @@ function _pseudo_population(ed::EgoData, m::Int, target_density::Float64,
 end
 
 """
-    ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm}; kwargs...) -> EgoERGMResult
+    fit_ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm}; kwargs...) -> EgoERGMResult
 
 Fit an ERGM to egocentrically sampled data, following `ergm.ego`:
 
@@ -581,6 +581,9 @@ Standard errors combine the inverse-information (model) component with the
 survey-design variance of the targets:
 `V(θ̂) = I⁻¹ + I⁻¹ Σ_design I⁻¹`.
 
+[`ergm_ego`](@ref) is the R-faithful alias (matching the `ergm.ego`
+package); `fit_ego_ergm` is a legacy alias.
+
 # Keyword Arguments
 - `ppopsize::Int`: Pseudo-population size (default: `popsize` if known and
   ≤ 1000, otherwise `10 ×` the number of egos)
@@ -589,15 +592,15 @@ survey-design variance of the targets:
 - `n_samples, burnin, interval, max_iter, tol`: MCMC moment-matching controls
 - `rng`: Random number generator
 """
-function ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
-                  ppopsize::Union{Int, Nothing}=nothing,
-                  popsize::Union{Int, Nothing}=nothing,
-                  n_samples::Int=400,
-                  burnin::Int=2000,
-                  interval::Int=20,
-                  max_iter::Int=25,
-                  tol::Float64=0.05,
-                  rng::Random.AbstractRNG=Random.default_rng())
+function fit_ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
+                      ppopsize::Union{Int, Nothing}=nothing,
+                      popsize::Union{Int, Nothing}=nothing,
+                      n_samples::Int=400,
+                      burnin::Int=2000,
+                      interval::Int=20,
+                      max_iter::Int=25,
+                      tol::Float64=0.05,
+                      rng::Random.AbstractRNG=Random.default_rng())
     isempty(terms) && throw(ArgumentError("need at least one term"))
     any(t -> t isa EgoEdges, terms) ||
         throw(ArgumentError("the model must include EgoEdges() (as ergm.ego models include edges)"))
@@ -685,7 +688,20 @@ function ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
     return EgoERGMResult(ego_model, coefficients, se, vcov_θ, adjustment, converged, samples)
 end
 
-const fit_ego_ergm = ergm_ego
+"""
+    ergm_ego(ed::EgoData, terms; kwargs...)
+
+R-faithful alias for [`fit_ergm_ego`](@ref) (the same function), matching
+the R `ergm.ego` package name.
+"""
+const ergm_ego = fit_ergm_ego
+
+"""
+    fit_ego_ergm(ed::EgoData, terms; kwargs...)
+
+Alias for [`fit_ergm_ego`](@ref), kept for backward compatibility.
+"""
+const fit_ego_ergm = fit_ergm_ego
 
 # Survey-design covariance of the target statistics: targets are
 # m·(weighted mean of per-ego contributions), so

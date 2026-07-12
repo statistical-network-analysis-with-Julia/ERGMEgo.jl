@@ -529,7 +529,6 @@ function _pseudo_population(ed::EgoData, m::Int, target_density::Float64,
     net = network(m; directed=false)
 
     # Replicate egos proportionally to weight (largest-remainder rounding)
-    n_egos = length(ed.egos)
     w = ed.sampling_weights ./ sum(ed.sampling_weights)
     counts = floor.(Int, w .* m)
     remainder = m - sum(counts)
@@ -639,7 +638,7 @@ function fit_ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
     # MCMC moment matching (Newton on targets − E[g])
     converged = false
     samples = Matrix{Float64}(undef, 0, p)
-    for iter in 1:max_iter
+    for _ in 1:max_iter
         samples = mh_sample(model, θ; n_samples=n_samples, burnin=burnin,
                             interval=interval, rng=rng).stats
         mean_stats = vec(mean(samples, dims=1))
@@ -822,17 +821,13 @@ end
 # Diagnostics
 # =============================================================================
 
-"""
-    ego_gof(result::EgoERGMResult; n_sim=50, rng=Random.default_rng()) -> NamedTuple
-
-Goodness of fit for an egocentric ERGM: simulate pseudo-population
-networks at the fitted (pseudo-population scale) coefficients, take ego
-samples of the observed size from each, and compare the observed
-design-weighted mean degree and mean alter-tie count against their
-simulated distributions (two-sided Monte Carlo p-values).
-"""
-function ego_gof(result::EgoERGMResult; n_sim::Int=50,
-                 rng::Random.AbstractRNG=Random.default_rng())
+# Shared machinery of `gof` and the legacy `ego_gof`: simulate
+# pseudo-population networks at the fitted (pseudo-population scale)
+# coefficients, take ego samples of the observed size from each, and
+# summarize each sample. Returns the observed summary statistics plus the
+# simulated mean-degree and mean-alter-tie vectors.
+function _gof_simulations(result::EgoERGMResult, n_sim::Int,
+                          rng::Random.AbstractRNG)
     model = result.model
     ed = model.data
     m = model.ppopsize
@@ -856,6 +851,55 @@ function ego_gof(result::EgoERGMResult; n_sim::Int=50,
         push!(sim_mean_degree, ss.mean_degree)
         push!(sim_mean_aaties, ss.mean_alter_ties)
     end
+
+    return obs, sim_mean_degree, sim_mean_aaties
+end
+
+"""
+    gof(result::EgoERGMResult; n_sim=50, rng=Random.default_rng()) -> GOFResult
+
+Goodness-of-fit assessment of a fitted egocentric ERGM: pseudo-population
+networks are simulated at the fitted (pseudo-population scale)
+coefficients, ego samples of the observed size are drawn from each, and
+the observed design-weighted mean degree and mean alter-tie count are
+compared against their simulated distributions.
+
+This is a method of the shared `Network.gof` generic; it returns the
+shared `Network.GOFResult` (observed value, simulation envelope, and
+two-sided Monte-Carlo p-value per level, computed with the
+`(1 + k)/(N + 1)` estimator, so it is never exactly zero).
+
+[`ego_gof`](@ref) is the legacy NamedTuple-returning form.
+
+# Keyword Arguments
+- `n_sim::Int=50`: Number of simulated networks
+- `rng`: Random number generator
+"""
+function gof(result::EgoERGMResult; n_sim::Int=50,
+             rng::Random.AbstractRNG=Random.default_rng())
+    obs, sim_mean_degree, sim_mean_aaties = _gof_simulations(result, n_sim, rng)
+    stat = GOFStatistic("ego summary statistics",
+                        ["mean degree", "mean alter ties"],
+                        [obs.mean_degree, obs.mean_alter_ties],
+                        hcat(sim_mean_degree, sim_mean_aaties))
+    return GOFResult([stat]; model="Egocentric ERGM")
+end
+
+"""
+    ego_gof(result::EgoERGMResult; n_sim=50, rng=Random.default_rng()) -> NamedTuple
+
+Goodness of fit for an egocentric ERGM: simulate pseudo-population
+networks at the fitted (pseudo-population scale) coefficients, take ego
+samples of the observed size from each, and compare the observed
+design-weighted mean degree and mean alter-tie count against their
+simulated distributions (two-sided Monte Carlo p-values).
+
+Legacy NamedTuple-returning form; prefer [`gof`](@ref), which returns the
+shared `Network.GOFResult`.
+"""
+function ego_gof(result::EgoERGMResult; n_sim::Int=50,
+                 rng::Random.AbstractRNG=Random.default_rng())
+    obs, sim_mean_degree, sim_mean_aaties = _gof_simulations(result, n_sim, rng)
 
     mc_p = (sim, o) -> min(1.0, 2.0 * min(mean(sim .>= o), mean(sim .<= o)))
 

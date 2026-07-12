@@ -249,4 +249,45 @@ end
         # on mean degree
         @test g.p_values.mean_degree > 0.01
     end
+
+    @testset "fit aliases, shared show, and Network.gof" begin
+        # Standardized fit_<model> entry point with R-faithful and legacy
+        # aliases bound to the same function
+        @test ergm_ego === fit_ergm_ego
+        @test fit_ego_ergm === fit_ergm_ego
+
+        # One gof generic across the ecosystem: the method is added to
+        # Network.gof, not a package-local function
+        @test ERGMEgo.gof === Network.gof
+
+        Random.seed!(107)   # ERGM's MCMC sampler draws from the global RNG
+        rng = Random.Xoshiro(21)
+        n = 25
+        net = network(n; directed=false)
+        for i in 1:n, j in (i+1):n
+            rand(rng) < 0.15 && add_edge!(net, i, j)
+        end
+        ed = simulate_ego_sample(net, n; rng=rng)
+        result = fit_ergm_ego(ed, [EgoEdges()]; ppopsize=n,
+                              n_samples=200, burnin=1000, interval=10, rng=rng)
+
+        # show renders through the shared coefficient-table printer
+        out = sprint(show, result)
+        @test occursin("Egocentric ERGM Results", out)
+        @test occursin("Estimate", out)
+        @test occursin("Pr(>|z|)", out)
+        @test occursin("Signif. codes", out)
+
+        # gof returns the shared GOFResult container
+        g = gof(result; n_sim=8, rng=rng)
+        @test g isa Network.GOFResult
+        @test Network.n_simulations(g) == 8
+        stat = g.statistics[1]
+        @test stat.labels == ["mean degree", "mean alter ties"]
+        @test stat.observed[1] ≈ summary_stats(ed).mean_degree
+        @test all(p -> 0 < p <= 1, stat.p_values)
+        gout = sprint(show, g)
+        @test occursin("Goodness-of-fit assessment: Egocentric ERGM", gout)
+        @test occursin("MC p-value", gout)
+    end
 end

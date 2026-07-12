@@ -15,6 +15,23 @@
 ERGMs for egocentrically sampled network data in Julia — a port of the R
 `ergm.ego` package (Krivitsky & Morris 2017).
 
+## Installation
+
+Requires Julia 1.12+. ERGMEgo.jl depends on the unregistered
+[Network.jl](https://github.com/statistical-network-analysis-with-Julia/Network.jl) and [ERGM.jl](https://github.com/statistical-network-analysis-with-Julia/ERGM.jl) packages, which must be added first (in this order):
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/ERGM.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/ERGMEgo.jl")
+```
+
+For development, you can instead clone all ecosystem repositories side by
+side (the monorepo layout) and start Julia with the root workspace project
+(`julia --project=.` in the clone root): the `[sources]` path dependencies
+then wire the packages together with no ordered installs needed.
+
 ## Methodology
 
 Given a sample of egos with their local networks (alters and alter–alter
@@ -59,7 +76,9 @@ ed = as_egodata(ego_df, alter_df; aatie_df = aatie_df,
                 ego_attrs = [:group], alter_attrs = [:group],
                 weight_col = :w)
 
-# Fit an egocentric ERGM (population of 500, pseudo-population of 100)
+# Fit an egocentric ERGM (population of 500, pseudo-population of 100).
+# fit_ergm_ego is the standardized entry point (fit_<model> naming);
+# ergm_ego is the R-faithful alias of the same function.
 result = ergm_ego(ed, [EgoEdges(), EgoNodeMatch(:group)];
                   ppopsize = 100, popsize = 500)
 

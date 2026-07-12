@@ -18,6 +18,7 @@ Port of the R ergm.ego package from the StatNet collection.
 module ERGMEgo
 
 using DataFrames
+using Distributions
 using ERGM
 using Graphs
 using LinearAlgebra
@@ -27,6 +28,12 @@ using Statistics
 using StatsBase
 
 import ERGM: name, compute, summary_stats
+# Shared presentation infrastructure (Network.jl): the ONE `gof` generic all
+# model packages extend, plus the common coefficient-table printer and
+# GOF containers
+import Network: gof, print_coeftable, GOFStatistic, GOFResult
+import StatsAPI
+import StatsAPI: coef, stderror, vcov
 
 # Data structures
 export EgoData, EgoNetwork
@@ -41,7 +48,7 @@ export ego_mixing_matrix, ego_target_stats
 export summary_stats
 
 # Estimation
-export ergm_ego, fit_ego_ergm, EgoERGMModel, EgoERGMResult
+export fit_ergm_ego, ergm_ego, fit_ego_ergm, EgoERGMModel, EgoERGMResult
 
 # Population size estimation
 export estimate_popsize
@@ -49,8 +56,12 @@ export estimate_popsize
 # Simulation
 export simulate_ego_sample
 
-# Diagnostics
-export ego_gof
+# Diagnostics: gof is a method of the shared Network.jl generic; ego_gof is
+# the legacy NamedTuple-returning form
+export gof, ego_gof
+
+# StatsAPI methods (re-exported so `coef(fit)` etc. work with just `using ERGMEgo`)
+export coef, stderror, vcov
 
 # =============================================================================
 # Ego Network Data Structures
@@ -466,6 +477,8 @@ Results from `ergm_ego`.
   includes the network-size adjustment `−log(popsize/ppopsize)`)
 - `std_errors`: Standard errors combining the model-based and
   survey-design variance components
+- `vcov`: Estimated covariance matrix of the coefficients,
+  `I⁻¹ + I⁻¹ Σ_design I⁻¹`
 - `netsize_adjustment`: The `−log(popsize/ppopsize)` adjustment applied to
   the edges coefficient
 - `converged`: Whether moment matching converged
@@ -476,10 +489,16 @@ struct EgoERGMResult
     model::EgoERGMModel
     coefficients::Vector{Float64}
     std_errors::Vector{Float64}
+    vcov::Matrix{Float64}
     netsize_adjustment::Float64
     converged::Bool
     sim_stats::Matrix{Float64}
 end
+
+# Two-sided normal p-values via the complementary CDF (the naive
+# 2(1 − cdf) form underflows to exactly 0 beyond |z| ≈ 8.3); NaN standard
+# errors give NaN p-values, which the shared printer renders as "NaN"
+_z_pvalues(z::AbstractVector{Float64}) = 2 .* ccdf.(Normal(), abs.(z))
 
 function Base.show(io::IO, result::EgoERGMResult)
     println(io, "Egocentric ERGM Results")
@@ -490,11 +509,17 @@ function Base.show(io::IO, result::EgoERGMResult)
     println(io, "Converged: $(result.converged)")
     println(io)
     println(io, "Coefficients (population scale):")
-    for (i, term) in enumerate(result.model.ego_terms)
-        println(io, "  $(rpad(name(term), 24)) $(lpad(round(result.coefficients[i], digits=4), 10)) " *
-                    "(SE: $(round(result.std_errors[i], digits=4)))")
-    end
+    z = result.coefficients ./ result.std_errors
+    print_coeftable(io, [name(term) for term in result.model.ego_terms],
+                    result.coefficients, result.std_errors, _z_pvalues(z);
+                    z_values=z)
 end
+
+# StatsAPI interface: methods on the shared statistics generics (mirroring
+# ERGM.jl), so `coef(fit)` etc. work on egocentric fits too
+StatsAPI.coef(result::EgoERGMResult) = result.coefficients
+StatsAPI.stderror(result::EgoERGMResult) = result.std_errors
+StatsAPI.vcov(result::EgoERGMResult) = result.vcov
 
 # Build the pseudo-population network: m vertices whose attributes are
 # ego attributes replicated proportionally to the sampling weights, with
@@ -612,7 +637,8 @@ function ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
     converged = false
     samples = Matrix{Float64}(undef, 0, p)
     for iter in 1:max_iter
-        samples = ERGM._mcmc_sample(model, θ, n_samples, burnin, interval)
+        samples = mh_sample(model, θ; n_samples=n_samples, burnin=burnin,
+                            interval=interval, rng=rng).stats
         mean_stats = vec(mean(samples, dims=1))
         diff = targets .- mean_stats
 
@@ -634,7 +660,8 @@ function ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
     end
 
     # Final sample at the fitted coefficients
-    samples = ERGM._mcmc_sample(model, θ, n_samples, burnin, interval)
+    samples = mh_sample(model, θ; n_samples=n_samples, burnin=burnin,
+                        interval=interval, rng=rng).stats
 
     # Variance: model component I⁻¹ plus design component I⁻¹ Σ_t I⁻¹,
     # where Σ_t is the survey variance of the target statistics
@@ -655,7 +682,7 @@ function ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
     coefficients[edges_idx] += adjustment
 
     ego_model = EgoERGMModel(ego_terms, ergm_terms, ed, m, N, targets)
-    return EgoERGMResult(ego_model, coefficients, se, adjustment, converged, samples)
+    return EgoERGMResult(ego_model, coefficients, se, vcov_θ, adjustment, converged, samples)
 end
 
 const fit_ego_ergm = ergm_ego

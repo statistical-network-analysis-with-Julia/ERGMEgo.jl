@@ -143,6 +143,7 @@ end
     @testset "ergm_ego recovers a Bernoulli density" begin
         # Population: G(n, p); the edges-only egocentric fit should give
         # a population-scale coefficient ≈ logit(p)
+        Random.seed!(101)   # ERGM's MCMC sampler draws from the global RNG
         rng = Random.Xoshiro(11)
         n = 60
         p_true = 0.08
@@ -162,9 +163,47 @@ end
         @test result.coefficients[1] ≈ log(realized_p / (1 - realized_p)) atol = 0.25
         @test all(isfinite, result.std_errors)
         @test result.std_errors[1] > 0
+
+        # StatsAPI accessors (extensions of the shared generics, as in ERGM.jl)
+        @test coef(result) === result.coefficients
+        @test stderror(result) === result.std_errors
+        @test vcov(result) === result.vcov
+        @test size(vcov(result)) == (1, 1)
+        @test sqrt(abs(vcov(result)[1, 1])) ≈ result.std_errors[1]
+    end
+
+    @testset "ergm_ego with attribute terms" begin
+        # Homophilous population: within-group ties much more likely than
+        # between-group ties. Fitting EgoNodeMatch requires the pseudo-
+        # population's vertex attributes to survive the MCMC network copies
+        # (ERGM._copy_network is attribute-preserving via Base.copy).
+        Random.seed!(102)   # ERGM's MCMC sampler draws from the global RNG
+        rng = Random.Xoshiro(21)
+        n = 40
+        net = network(n; directed=false)
+        group = Dict(v => (v <= n ÷ 2 ? "A" : "B") for v in 1:n)
+        set_vertex_attribute!(net, :group, group)
+        for i in 1:n, j in (i+1):n
+            p_tie = group[i] == group[j] ? 0.25 : 0.03
+            rand(rng) < p_tie && add_edge!(net, i, j)
+        end
+
+        ed = simulate_ego_sample(net, n; ego_attrs=[:group], rng=rng)
+        result = ergm_ego(ed, [EgoEdges(), EgoNodeMatch(:group)];
+                          ppopsize=n, popsize=n,
+                          n_samples=400, burnin=5000, interval=20,
+                          rng=Random.Xoshiro(2))
+
+        @test result.converged
+        # The sampled nodematch statistics vary; they would be identically
+        # zero if the sampler's network copies dropped vertex attributes
+        @test std(result.sim_stats[:, 2]) > 0
+        # Strong homophily is recovered as a positive nodematch coefficient
+        @test result.coefficients[2] > 0
     end
 
     @testset "Netsize adjustment" begin
+        Random.seed!(103)   # ERGM's MCMC sampler draws from the global RNG
         rng = Random.Xoshiro(5)
         n = 40
         net = network(n; directed=false)
@@ -191,6 +230,7 @@ end
     end
 
     @testset "ego_gof" begin
+        Random.seed!(104)   # ERGM's MCMC sampler draws from the global RNG
         rng = Random.Xoshiro(9)
         n = 30
         net = network(n; directed=false)

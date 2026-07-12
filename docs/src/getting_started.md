@@ -7,6 +7,7 @@ rows, and (optionally) one of alter–alter ties:
 
 ```julia
 using ERGMEgo, DataFrames
+using ERGM: compute   # generic statistic evaluator shared with ERGM.jl
 
 ego_df   = DataFrame(ego_id = [1, 2], group = ["A", "B"], w = [2.0, 1.0])
 alter_df = DataFrame(ego_id = [1, 1, 2], alter_id = [10, 11, 10],
@@ -23,12 +24,23 @@ summary_stats(ed)
 Alter IDs are preserved exactly as given, so alters named by several egos
 remain identifiable (used by capture-recapture population estimation).
 
-Or by sampling egos from a complete network:
+Or by sampling egos from a complete network. The network must actually
+carry the attributes named in `ego_attrs` — fitting a term on an
+attribute the network does not have raises an `ArgumentError` (from
+ERGM.jl's model validation) instead of silently fitting a zero statistic:
 
 ```julia
-using Network
+using Network, Random
+
+Random.seed!(1)
 net = network(100; directed = false)
-# ... add edges and attributes ...
+for _ in 1:300
+    i, j = rand(1:100), rand(1:100)
+    i == j || add_edge!(net, i, j)
+end
+set_vertex_attribute!(net, :group,
+    Dict(v => (isodd(v) ? "A" : "B") for v in 1:100))
+
 ed = simulate_ego_sample(net, 30; ego_attrs = [:group])
 ```
 

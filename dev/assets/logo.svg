@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <radialGradient id="grad-purple" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#b57fe3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#9558B2;stop-opacity:1" />
+    </radialGradient>
+    <radialGradient id="grad-red" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#e65c53;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#CB3C33;stop-opacity:1" />
+    </radialGradient>
+    <radialGradient id="grad-green" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" style="stop-color:#5cb84b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#389826;stop-opacity:1" />
+    </radialGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="1" dy="1" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.25"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode in="offsetblur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect x="8" y="8" width="184" height="184" rx="32" fill="#ffffff" stroke="#e0e0e0" stroke-width="1.5"/>
+
+  <!-- Ego network graph -->
+  <g transform="translate(100, 72)" filter="url(#shadow)">
+    <!-- Ego-alter edges (solid) -->
+    <line x1="0" y1="0" x2="0" y2="-40" stroke="#4063D8" stroke-width="3" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="38" y2="12" stroke="#4063D8" stroke-width="3" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="-38" y2="12" stroke="#4063D8" stroke-width="3" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="24" y2="35" stroke="#4063D8" stroke-width="3" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="-24" y2="35" stroke="#4063D8" stroke-width="3" stroke-linecap="round"/>
+
+    <!-- Alter-alter edges (dashed) -->
+    <line x1="0" y1="-40" x2="38" y2="12" stroke="#4063D8" stroke-width="2" stroke-dasharray="4,3" stroke-linecap="round" opacity="0.5"/>
+    <line x1="-38" y1="12" x2="-24" y2="35" stroke="#4063D8" stroke-width="2" stroke-dasharray="4,3" stroke-linecap="round" opacity="0.5"/>
+
+    <!-- Alter nodes (smaller, green) -->
+    <circle cx="0" cy="-40" r="10" fill="url(#grad-green)" stroke="#ffffff" stroke-width="1.5"/>
+    <circle cx="38" cy="12" r="10" fill="url(#grad-green)" stroke="#ffffff" stroke-width="1.5"/>
+    <circle cx="-38" cy="12" r="10" fill="url(#grad-green)" stroke="#ffffff" stroke-width="1.5"/>
+    <circle cx="24" cy="35" r="10" fill="url(#grad-green)" stroke="#ffffff" stroke-width="1.5"/>
+    <circle cx="-24" cy="35" r="10" fill="url(#grad-green)" stroke="#ffffff" stroke-width="1.5"/>
+
+    <!-- Ego node (larger, purple) -->
+    <circle cx="0" cy="0" r="18" fill="url(#grad-purple)" stroke="#ffffff" stroke-width="2"/>
+  </g>
+
+  <!-- Package name -->
+  <g transform="translate(100, 152)" text-anchor="middle" font-family="sans-serif" font-weight="900" font-size="14" letter-spacing="0.5">
+    <text x="-38" y="0" fill="#9558B2">E</text>
+    <text x="-27" y="0" fill="#CB3C33">R</text>
+    <text x="-15" y="0" fill="#389826">G</text>
+    <text x="-3" y="0" fill="#9558B2">M</text>
+    <text x="10" y="0" fill="#CB3C33">E</text>
+    <text x="21" y="0" fill="#389826">g</text>
+    <text x="31" y="0" fill="#9558B2">o</text>
+  </g>
+  <text x="100" y="170" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="12" fill="#555555">.jl</text>
+</svg>

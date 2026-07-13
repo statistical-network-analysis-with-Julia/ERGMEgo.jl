@@ -22,16 +22,22 @@ using Distributions
 using ERGM
 using Graphs
 using LinearAlgebra
-using Network
+using Networks
 using Random
 using Statistics
 using StatsBase
 
 import ERGM: name, compute, summary_stats
-# Shared presentation infrastructure (Network.jl): the ONE `gof` generic all
+# Shared presentation infrastructure (Networks.jl): the ONE `gof` generic all
 # model packages extend, plus the common coefficient-table printer and
 # GOF containers
-import Network: gof, print_coeftable, GOFStatistic, GOFResult
+import Networks: gof, print_coeftable, GOFStatistic, GOFResult
+
+# The shared result-metadata protocol (Networks.jl `src/results.jl`): the
+# generic accessors that say what a fit actually did. Imported by name because
+# ERGMEgo adds methods for `EgoERGMResult`; `fit_metadata(fit)` collects them.
+import Networks: estimand, objective, is_exact, se_method, missing_method,
+                 approximations
 import StatsAPI
 import StatsAPI: coef, stderror, vcov
 
@@ -56,7 +62,7 @@ export estimate_popsize
 # Simulation
 export simulate_ego_sample
 
-# Diagnostics: gof is a method of the shared Network.jl generic; ego_gof is
+# Diagnostics: gof is a method of the shared Networks.jl generic; ego_gof is
 # the legacy NamedTuple-returning form
 export gof, ego_gof
 
@@ -513,6 +519,83 @@ function Base.show(io::IO, result::EgoERGMResult)
     print_coeftable(io, [name(term) for term in result.model.ego_terms],
                     result.coefficients, result.std_errors, _z_pvalues(z);
                     z_values=z)
+
+    # Honest-uncertainty caveat, the prose twin of `approximations(result)`:
+    # the "survey-design" variance component assumes independent egos carrying
+    # the given case weights and nothing more (issue #1).
+    println(io)
+    println(io, "Note: the design variance component assumes independently sampled egos")
+    println(io, "with the given case weights. It encodes no strata, clusters, finite-")
+    println(io, "population correction, replicate weights, without-replacement inclusion")
+    println(io, "probabilities, or alter dependence, so the standard errors are narrower")
+    println(io, "than \"survey-design variance\" implies for any richer design.")
+end
+
+# ============================================================================
+# The shared result-metadata protocol (Networks.jl `src/results.jl`)
+# ============================================================================
+#
+# `fit_metadata(fit)` collects these accessors. The caveats below are the
+# machine-readable twin of the note `show` prints, so the two cannot disagree.
+
+estimand(::EgoERGMResult) = :ergm_ego
+
+"""
+    objective(::EgoERGMResult) -> Symbol
+
+`:moment` — the fit is MCMC **moment matching** (Newton iterations on
+`targets − E_θ[g]`), not a likelihood maximization: no likelihood, exact or
+approximate, is ever evaluated.
+"""
+objective(::EgoERGMResult) = :moment
+
+"""
+    is_exact(::EgoERGMResult) -> Bool
+
+Always `false`. The estimator matches design-weighted target statistics against
+Monte-Carlo means simulated on a *pseudo-population* network of size `ppopsize`
+— two distinct approximations to the population likelihood, neither of which
+collapses to it for any formula.
+"""
+is_exact(::EgoERGMResult) = false
+
+"""
+    se_method(::EgoERGMResult) -> Symbol
+
+`:sandwich`: `V(θ̂) = I⁻¹ + I⁻¹ Σ_design I⁻¹`, the inverse MCMC information plus
+an inverse-information-sandwiched survey-design covariance of the targets. See
+[`approximations`](@ref) for what that design covariance does and does not
+encode.
+"""
+se_method(::EgoERGMResult) = :sandwich
+
+# Egocentric data is a sample of egos and their reported alters, not a
+# sociomatrix with a dyad mask: the missing-dyad concept does not arise.
+missing_method(::EgoERGMResult) = :none
+
+function approximations(result::EgoERGMResult)
+    out = [
+        "method-of-moments fit by MCMC: the targets are matched against " *
+        "simulated means, so the estimates carry Monte-Carlo error",
+        "the model is simulated on a pseudo-population network of size " *
+        "$(result.model.ppopsize), not the population of size " *
+        "$(result.model.popsize); the edges coefficient is put on the " *
+        "population scale by the size adjustment " *
+        "$(round(result.netsize_adjustment, digits=4))",
+        # Issue ERGMEgo#1: the design variance is narrower than advertised.
+        "the survey-design variance component is the weighted-mean variance of " *
+        "the target statistics under INDEPENDENT egos with the given case " *
+        "weights: it encodes no strata, clusters, finite-population correction, " *
+        "replicate weights, without-replacement inclusion probabilities, or " *
+        "alter dependence, so the standard errors are narrower than " *
+        "\"survey-design variance\" implies for any richer sampling design",
+        "the Monte-Carlo variance of the pseudo-population construction itself " *
+        "is not included in the reported standard errors",
+    ]
+    result.converged ||
+        pushfirst!(out, "moment matching did NOT converge: the estimates do not " *
+                        "solve the moment equations")
+    return out
 end
 
 # StatsAPI interface: methods on the shared statistics generics (mirroring
@@ -594,11 +677,11 @@ package); `fit_ego_ergm` is a legacy alias.
 function fit_ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
                       ppopsize::Union{Int, Nothing}=nothing,
                       popsize::Union{Int, Nothing}=nothing,
-                      n_samples::Int=400,
-                      burnin::Int=2000,
-                      interval::Int=20,
-                      max_iter::Int=25,
-                      tol::Float64=0.05,
+                      n_samples::Union{Int, Nothing}=nothing,
+                      burnin::Union{Int, Nothing}=nothing,
+                      interval::Union{Int, Nothing}=nothing,
+                      max_iter::Int=80,
+                      tol::Float64=0.01,
                       rng::Random.AbstractRNG=Random.default_rng())
     isempty(terms) && throw(ArgumentError("need at least one term"))
     any(t -> t isa EgoEdges, terms) ||
@@ -627,6 +710,17 @@ function fit_ergm_ego(ed::EgoData, terms::Vector{<:EgoTerm};
     target_density = targets[edges_idx] / n_dyads
     target_density < 1 ||
         throw(ArgumentError("target mean degree implies density ≥ 1; increase ppopsize"))
+
+    # MCMC controls scale with the size of the PSEUDO-POPULATION, not with the
+    # ego sample. The chain has to mix over m(m−1)/2 dyads, and fixed defaults
+    # (400/2000/20) silently stopped mixing as m grew: on the 205-actor
+    # faux.mesa census they returned edges ≈ −21.9 against a true −6.02 — off by
+    # a factor of three, flagged only by `converged == false`. Scaling with the
+    # dyad count is the same fix ERGM.jl's MCMLE already applies.
+    n_dyads_int = Int(n_dyads)
+    n_samples = something(n_samples, max(400, min(3000, 20 * m)))
+    burnin    = something(burnin, max(2000, 3 * n_dyads_int ÷ 2))
+    interval  = something(interval, max(20, n_dyads_int ÷ 70))
 
     net = _pseudo_population(ed, m, target_density, rng)
     model = ERGMModel(ERGMFormula(ergm_terms), net)
@@ -708,6 +802,8 @@ const fit_ego_ergm = fit_ergm_ego
 function _design_cov(terms, ed::EgoData, m::Int)
     n = length(ed.egos)
     p = length(terms)
+    n >= 2 || throw(ArgumentError(
+        "the design variance of the ego targets needs at least 2 egos (got $n)"))
     w = ed.sampling_weights ./ sum(ed.sampling_weights)
 
     H = Matrix{Float64}(undef, n, p)
@@ -721,6 +817,18 @@ function _design_cov(terms, ed::EgoData, m::Int)
         d = H[i, :] .- h̄
         Σ .+= (w[i]^2) .* (d * d')
     end
+
+    # Bessel/finite-sample correction. The weighted sum above divides the
+    # squared deviations by n (each wᵢ = 1/n under a census, so Σwᵢ² = 1/n);
+    # the survey (Horvitz–Thompson / SRS) variance of a weighted mean — which
+    # is what `ergm.ego` computes — divides by n − 1. Without this factor the
+    # design variance, and hence every standard error, is too small by exactly
+    # (n − 1)/n. That was measurably wrong against `ergm.ego`
+    # (test/fixtures/fauxmesa_ego_census.toml) and it matters: the design
+    # component of V(θ̂) is an order of magnitude larger than the estimation
+    # component, so an ego SE essentially *is* its design variance.
+    Σ .*= n / (n - 1)
+
     return (m^2) .* Σ
 end
 
@@ -864,8 +972,8 @@ coefficients, ego samples of the observed size are drawn from each, and
 the observed design-weighted mean degree and mean alter-tie count are
 compared against their simulated distributions.
 
-This is a method of the shared `Network.gof` generic; it returns the
-shared `Network.GOFResult` (observed value, simulation envelope, and
+This is a method of the shared `Networks.gof` generic; it returns the
+shared `Networks.GOFResult` (observed value, simulation envelope, and
 two-sided Monte-Carlo p-value per level, computed with the
 `(1 + k)/(N + 1)` estimator, so it is never exactly zero).
 
@@ -895,7 +1003,7 @@ design-weighted mean degree and mean alter-tie count against their
 simulated distributions (two-sided Monte Carlo p-values).
 
 Legacy NamedTuple-returning form; prefer [`gof`](@ref), which returns the
-shared `Network.GOFResult`.
+shared `Networks.GOFResult`.
 """
 function ego_gof(result::EgoERGMResult; n_sim::Int=50,
                  rng::Random.AbstractRNG=Random.default_rng())

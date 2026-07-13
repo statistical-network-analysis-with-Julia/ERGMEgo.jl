@@ -1,6 +1,6 @@
 using ERGMEgo
 using ERGM
-using Network
+using Networks
 using DataFrames
 using Random
 using Statistics
@@ -250,15 +250,15 @@ end
         @test g.p_values.mean_degree > 0.01
     end
 
-    @testset "fit aliases, shared show, and Network.gof" begin
+    @testset "fit aliases, shared show, and Networks.gof" begin
         # Standardized fit_<model> entry point with R-faithful and legacy
         # aliases bound to the same function
         @test ergm_ego === fit_ergm_ego
         @test fit_ego_ergm === fit_ergm_ego
 
         # One gof generic across the ecosystem: the method is added to
-        # Network.gof, not a package-local function
-        @test ERGMEgo.gof === Network.gof
+        # Networks.gof, not a package-local function
+        @test ERGMEgo.gof === Networks.gof
 
         Random.seed!(107)   # ERGM's MCMC sampler draws from the global RNG
         rng = Random.Xoshiro(21)
@@ -280,8 +280,8 @@ end
 
         # gof returns the shared GOFResult container
         g = gof(result; n_sim=8, rng=rng)
-        @test g isa Network.GOFResult
-        @test Network.n_simulations(g) == 8
+        @test g isa Networks.GOFResult
+        @test Networks.n_simulations(g) == 8
         stat = g.statistics[1]
         @test stat.labels == ["mean degree", "mean alter ties"]
         @test stat.observed[1] ≈ summary_stats(ed).mean_degree
@@ -289,5 +289,192 @@ end
         gout = sprint(show, g)
         @test occursin("Goodness-of-fit assessment: Egocentric ERGM", gout)
         @test occursin("MC p-value", gout)
+
+        # Result metadata protocol: the fit says what it actually did
+        md = Networks.fit_metadata(result)
+        @test md.estimand == :ergm_ego
+        # Moment matching, not a likelihood: never exact
+        @test md.objective == :moment
+        @test !md.is_exact
+        @test md.se_method == :sandwich
+        @test md.missing_method == :none
+        @test md.tie_method == :not_applicable
+
+        # Issue #1: the design variance is narrower than "survey-design
+        # variance" advertises, and the fit now says so — in the protocol and
+        # in the printed output alike
+        @test any(occursin("no strata, clusters", a) for a in md.approximations)
+        @test any(occursin("Monte-Carlo error", a) for a in md.approximations)
+        @test any(occursin("pseudo-population network of size", a)
+                  for a in md.approximations)
+        @test occursin("strata, clusters", out)
+    end
+
+    # ------------------------------------------------------------------
+    # Golden fixture: statnet `ergm.ego` on faux.mesa.high under a CENSUS
+    # (issue #8, and the direct answer to issue ERGMEgo#1).
+    # test/fixtures/r/fauxmesa_ego_census.R regenerates it.
+    #
+    # The design is a census — every one of the 205 actors is an ego, unit
+    # weights, ppopsize = popsize = 205 — chosen precisely because it makes two
+    # of the three things being compared DETERMINISTIC:
+    #
+    #   * the target statistics (they become the observed network's own), and
+    #   * the design variance of those targets,
+    #
+    # so neither can be excused as Monte-Carlo noise. Only the fitted
+    # coefficients remain stochastic, and those get a tolerance measured from
+    # both packages' seed-to-seed spread.
+    # ------------------------------------------------------------------
+    @testset "Golden fixture: ergm.ego on faux.mesa.high (census design)" begin
+        g = load_golden(joinpath(@__DIR__, "fixtures", "fauxmesa_ego_census.toml"))
+        @test g.provenance["ergm_ego_version"] == "1.1.4"
+
+        # Rebuild R's network and its census egodata.
+        n = Int(g.values["n_actors"])
+        grade = Int.(g.values["grade"])
+        es = Int.(g.values["edge_src"])
+        ed_ = Int.(g.values["edge_dst"])
+        net = network(n; directed=false)
+        for k in eachindex(es)
+            add_edge!(net, es[k], ed_[k])
+        end
+        for v in 1:n
+            set_vertex_attribute!(net, :Grade, v, grade[v])
+        end
+        @test ne(net) == Int(g.values["n_edges"])
+
+        egos = ERGMEgo.EgoNetwork{Int}[]
+        for v in 1:n
+            alters = sort(collect(Int.(neighbors(net, v))))
+            k = length(alters)
+            ties = falses(k, k)
+            for a in 1:k, b in 1:k
+                a != b && has_edge(net, alters[a], alters[b]) && (ties[a, b] = true)
+            end
+            push!(egos, EgoNetwork(v, alters, Matrix(ties);
+                                   ego_attrs=Dict{Symbol,Any}(:Grade => grade[v]),
+                                   alter_attrs=Dict{Symbol,Vector}(:Grade => grade[alters])))
+        end
+        ed = EgoData(egos; population_size=n, sampling_weights=ones(n))
+        terms = [EgoEdges(), EgoNodeMatch(:Grade)]
+        m = Int(g.values["ppopsize"])
+
+        # --- (1) TARGETS: deterministic under a census, asserted exactly ------
+        # A census must reproduce the observed network's own statistics
+        # (edges = 203, nodematch.Grade = 163). It does, exactly.
+        targets = ego_target_stats(terms, ed, m)
+        @test check_golden(g, "targets", targets) ||
+              error(golden_report(g, "targets", targets))
+
+        # --- (2) THE DESIGN VARIANCE — ISSUE ERGMEgo#1, FOUND AND FIXED -------
+        # This is the sharpest measurement in the fixture: Σ_design is a function
+        # of the 205 per-ego contributions and the weights and NOTHING else, so a
+        # disagreement cannot be blamed on MCMC, on an I⁻¹ sandwich, or on a
+        # tolerance. There WAS a disagreement, and it was exact:
+        #
+        #   ERGMEgo.jl's design variance was TOO SMALL BY EXACTLY (n−1)/n.
+        #
+        # `_design_cov` summed m² Σᵢ wᵢ²(hᵢ−h̄)(hᵢ−h̄)′ with wᵢ = 1/n, i.e. it
+        # divided the sum of squared deviations by n. The survey (SRS /
+        # Horvitz–Thompson) variance of a mean, which ergm.ego computes, divides
+        # by n−1. One degrees-of-freedom correction, applied to every entry.
+        #
+        # It is now applied (`Σ .*= n/(n-1)` in `_design_cov`), so the design
+        # variance matches `ergm.ego` outright. This test asserts the FIXED
+        # behaviour; it would have caught the bug, and it will catch a regression.
+        # It matters because the fixture also shows the design component is ~17×
+        # the estimation component: an ego standard error essentially IS its
+        # design variance.
+        Σ_jl = ERGMEgo._design_cov(terms, ed, m)
+        Σ_r = reduce(vcat, [Float64.(r)' for r in g.values["design_cov"]])
+        @test size(Σ_jl) == size(Σ_r)
+        @test Σ_jl ≈ Σ_r atol = 1e-9              # exact agreement, every entry
+
+        jl_se = [sqrt(Σ_jl[i, i]) for i in axes(Σ_jl, 1)]
+        r_se = Float64.(g.values["design_std_errors"])
+        @test isapprox(jl_se, r_se; atol=1e-9)    # was @test_broken; now holds
+
+        # Pin the correction itself, so removing it cannot pass silently: the
+        # OLD (biased) estimator is exactly sqrt((n−1)/n) narrower.
+        @test jl_se .* sqrt((n - 1) / n) ≈ r_se .* sqrt((n - 1) / n) atol = 1e-9
+        @test all(jl_se .* sqrt((n - 1) / n) .< r_se)
+
+        # --- (3) THE FIT ------------------------------------------------------
+        # PARAMETERIZATION: ergm.ego splits the population edges parameter into a
+        # fixed offset netsize.adj = −log(popsize) = −5.3230 plus a free `edges`
+        # coefficient (−0.6974); ERGMEgo.jl reports it as ONE number on the
+        # pseudo-population scale. R's −0.697 and Julia's −6.07 are the same
+        # parameter in different clothes. The comparable quantity is the sum,
+        # which the fixture freezes as `mle_coefficients_population`.
+        @test Float64(g.values["netsize_adjustment"]) ≈ -log(n) atol = 1e-9
+
+        # MCMC BUDGET: the defaults do NOT work at this scale — see the testset
+        # below, which pins that. These settings are what it takes to converge on
+        # a 205-node network, and they cost ~7s for all five fits.
+        fits = [ergm_ego(ed, terms; n_samples=3000, burnin=30000, interval=300,
+                         max_iter=80, tol=0.01, rng=Random.Xoshiro(s))
+                for s in (101, 202, 303, 404, 505)]
+        @test all(f.converged for f in fits)
+        coefs = mean(f.coefficients for f in fits)
+        @test check_golden(g, "mle_coefficients_population", coefs) ||
+              error(golden_report(g, "mle_coefficients_population", coefs))
+
+        # ...and a census ego fit must reduce to a plain ERGM fit of the same
+        # model on the whole network — which is the strongest available check
+        # that the pseudo-population construction is not distorting anything. R's
+        # own plain-ergm MPLE is frozen; ERGM.jl reproduces it to 1e-11, and the
+        # egocentric fit lands within 0.04 of both.
+        plain = fit_ergm(net, [Edges(), NodeMatch(:Grade)])
+        @test plain.coefficients ≈ Float64.(g.values["plain_ergm_mple"]) atol = 1e-6
+        @test maximum(abs.(coefs .- plain.coefficients)) < 0.12
+    end
+
+    # ------------------------------------------------------------------
+    # ...and the defect the fixture above had to work around, pinned so it is on
+    # the record and cannot regress further.
+    # ------------------------------------------------------------------
+    @testset "ERGMEgo defaults do not converge at realistic network size" begin
+        g = load_golden(joinpath(@__DIR__, "fixtures", "fauxmesa_ego_census.toml"))
+        n = Int(g.values["n_actors"])
+        grade = Int.(g.values["grade"])
+        es = Int.(g.values["edge_src"]); ds = Int.(g.values["edge_dst"])
+        net = network(n; directed=false)
+        for k in eachindex(es); add_edge!(net, es[k], ds[k]); end
+        egos = ERGMEgo.EgoNetwork{Int}[]
+        for v in 1:n
+            alters = sort(collect(Int.(neighbors(net, v))))
+            k = length(alters)
+            ties = falses(k, k)
+            for a in 1:k, b in 1:k
+                a != b && has_edge(net, alters[a], alters[b]) && (ties[a, b] = true)
+            end
+            push!(egos, EgoNetwork(v, alters, Matrix(ties);
+                                   ego_attrs=Dict{Symbol,Any}(:Grade => grade[v]),
+                                   alter_attrs=Dict{Symbol,Vector}(:Grade => grade[alters])))
+        end
+        ed = EgoData(egos; population_size=n, sampling_weights=ones(n))
+        terms = [EgoEdges(), EgoNodeMatch(:Grade)]
+
+        # THE DEFAULTS, on a realistic network.
+        #
+        # They used to be fixed constants (n_samples=400, burnin=2000,
+        # interval=20) that did not scale with the pseudo-population. On this
+        # 205-actor census the chain stopped mixing and the fit returned
+        # edges ≈ −21.9 against a true −6.02 — off by a factor of THREE, on a
+        # network the size of the standard teaching dataset. It was not silent
+        # (`converged == false`), but an estimator whose defaults produce garbage
+        # at 205 nodes has a defaults problem.
+        #
+        # The MCMC controls now scale with the dyad count m(m−1)/2, exactly as
+        # ERGM.jl's MCMLE already did. This test asserts the FIXED behaviour: the
+        # defaults must converge here, and land on R's answer.
+        f = ergm_ego(ed, terms; rng=Random.Xoshiro(101))
+        r_pop = Float64.(g.values["mle_coefficients_population"])
+
+        @test f.converged
+        # Within Monte-Carlo reach of the ergm.ego MLE (was off by ~15.8)
+        @test abs(f.coefficients[1] - r_pop[1]) < 0.5
+        @test abs(f.coefficients[2] - r_pop[2]) < 0.5
     end
 end

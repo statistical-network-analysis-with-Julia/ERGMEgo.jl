@@ -18,11 +18,11 @@ ERGMs for egocentrically sampled network data in Julia — a port of the R
 ## Installation
 
 Requires Julia 1.12+. ERGMEgo.jl depends on the unregistered
-[Network.jl](https://github.com/statistical-network-analysis-with-Julia/Network.jl) and [ERGM.jl](https://github.com/statistical-network-analysis-with-Julia/ERGM.jl) packages, which must be added first (in this order):
+[Networks.jl](https://github.com/statistical-network-analysis-with-Julia/Networks.jl) and [ERGM.jl](https://github.com/statistical-network-analysis-with-Julia/ERGM.jl) packages, which must be added first (in this order):
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Network.jl")
+Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/Networks.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/ERGM.jl")
 Pkg.add(url="https://github.com/statistical-network-analysis-with-Julia/ERGMEgo.jl")
 ```
@@ -93,7 +93,7 @@ estimate_popsize(ed; method = :capture_recapture) # Lincoln-Petersen on alter ov
 ## Simulating ego samples
 
 ```julia
-using Network
+using Networks
 net = network(100; directed = false)
 # ... add edges/attributes ...
 ed = simulate_ego_sample(net, 30; ego_attrs = [:group])

@@ -54,8 +54,8 @@ increase `n_samples` for more stable standard errors.
 
 ## Goodness of fit
 
-[`gof`](@ref) — a method of the shared `Network.gof` generic returning
-the shared `Network.GOFResult` — simulates pseudo-population networks at
+[`gof`](@ref) — a method of the shared `Networks.gof` generic returning
+the shared `Networks.GOFResult` — simulates pseudo-population networks at
 the fitted coefficients, draws ego samples of the observed size, and
 compares the observed design-weighted mean degree and mean alter-tie
 count to their simulated distributions with two-sided Monte Carlo

@@ -2,12 +2,12 @@
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 ERGM = "d623cd87-b018-4e2a-bf53-b77ebcdc9da2"
 ERGMEgo = "531197fe-e020-4211-8eb0-cc8301fb2806"
-Network = "027a387e-e55f-4537-a155-5037e5a23bdb"
+Networks = "027a387e-e55f-4537-a155-5037e5a23bdb"
 
 [sources]
 ERGMEgo = {path = ".."}
 ERGM = {path = "../../ERGM.jl"}
-Network = {path = "../../Network.jl"}
+Networks = {path = "../../Networks.jl"}
 
 [compat]
 Documenter = "1"

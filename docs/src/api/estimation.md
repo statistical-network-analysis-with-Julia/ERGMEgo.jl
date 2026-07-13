@@ -13,8 +13,8 @@ simulate_ego_sample
 
 ## Diagnostics
 
-`gof` is a method of the shared `Network.gof` generic and returns the
-shared `Network.GOFResult`; [`ego_gof`](@ref) is the legacy
+`gof` is a method of the shared `Networks.gof` generic and returns the
+shared `Networks.GOFResult`; [`ego_gof`](@ref) is the legacy
 NamedTuple-returning form.
 
 ```@docs

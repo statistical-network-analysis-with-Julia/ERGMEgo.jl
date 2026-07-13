@@ -30,7 +30,7 @@ attribute the network does not have raises an `ArgumentError` (from
 ERGM.jl's model validation) instead of silently fitting a zero statistic:
 
 ```julia
-using Network, Random
+using Networks, Random
 
 Random.seed!(1)
 net = network(100; directed = false)
@@ -63,7 +63,7 @@ result = fit_ergm_ego(ed, [EgoEdges(), EgoNodeMatch(:group)];
                       ppopsize = 200, popsize = 1000)
 println(result)
 
-# Model checking: gof returns the shared Network.GOFResult
+# Model checking: gof returns the shared Networks.GOFResult
 gof(result)
 ```
 

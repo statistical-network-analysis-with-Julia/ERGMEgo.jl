@@ -51,3 +51,9 @@ ERGMEgo.ERGMEgo
 1. Krivitsky, P.N. & Morris, M. (2017). Inference for social network
    models from egocentrically sampled data. *Annals of Applied
    Statistics*, 11(1), 427-455.
+
+## Module
+
+```@docs
+ERGMEgo
+```

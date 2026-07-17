@@ -114,6 +114,21 @@ capture-recapture) is preserved.
    Data. R package.
    [https://cran.r-project.org/package=ergm.ego](https://cran.r-project.org/package=ergm.ego)
 
+## Citation
+
+If you use ERGMEgo.jl in your work, please cite it using the entry in
+[`CITATION.bib`](CITATION.bib):
+
+```biblatex
+@misc{SNWJERGMEgoJL,
+  author = {{Statistical Network Analysis with Julia}},
+  title = {ERGMEgo.jl: Exponential Random Graph Models for Egocentrically Sampled Network Data in Julia},
+  year = {2026},
+  url = {https://github.com/statistical-network-analysis-with-Julia/ERGMEgo.jl},
+  note = {Homepage: https://statistical-network-analysis-with-Julia.github.io/ERGMEgo.jl; GitHub: https://github.com/statistical-network-analysis-with-Julia}
+}
+```
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.

@@ -52,6 +52,22 @@ ERGMEgo.ERGMEgo
    models from egocentrically sampled data. *Annals of Applied
    Statistics*, 11(1), 427-455.
 
+
+## Citation
+
+If you use ERGMEgo.jl in your work, please cite it using the entry in
+[`CITATION.bib`](https://github.com/statistical-network-analysis-with-Julia/ERGMEgo.jl/blob/main/CITATION.bib):
+
+```biblatex
+@misc{SNWJERGMEgoJL,
+  author = {{Statistical Network Analysis with Julia}},
+  title = {ERGMEgo.jl: Exponential Random Graph Models for Egocentrically Sampled Network Data in Julia},
+  year = {2026},
+  url = {https://github.com/statistical-network-analysis-with-Julia/ERGMEgo.jl},
+  note = {Homepage: https://statistical-network-analysis-with-Julia.github.io/ERGMEgo.jl; GitHub: https://github.com/statistical-network-analysis-with-Julia}
+}
+```
+
 ## Module
 
 ```@docs

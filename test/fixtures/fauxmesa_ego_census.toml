@@ -1,0 +1,185 @@
+name = "fauxmesa_ego_census"
+
+[provenance]
+r_version = "4.6.1"
+ergm_ego_version = "1.1.4"
+ergm_version = "4.12.0"
+network_version = "1.20.0"
+seed = 20260713
+script = "test/fixtures/r/fauxmesa_ego_census.R"
+date = "2026-09-12"
+dataset = "ergm::faux.mesa.high: 205 students, 203 undirected friendship ties, Grade 7-12"
+sampling_design = "CENSUS: as.egor(faux.mesa.high) -- every actor is an ego, unit sampling weights, ppopsize = popsize = 205. A stated, known design, chosen so the target statistics and their design variance are both DETERMINISTIC and can be asserted exactly (issue ERGMEgo#1)."
+model = "egor ~ edges + nodematch(\"Grade\"), fitted by ergm.ego with an offset netsize.adj term"
+replication_seeds = "101,202,303,404,505"
+
+[tolerance]
+# TARGET STATISTICS. Under a census these are the observed network's own
+# statistics (edges = 203, nodematch.Grade = 163): a deterministic function
+# of the data, with no sampling and no Monte Carlo. Machine precision. A
+# failure here means the design-weighted per-capita scaling is wrong.
+targets = 1e-9
+#
+# DESIGN STANDARD ERRORS OF THE TARGETS -- THE POINT OF THIS FIXTURE, AND
+# THE DIRECT TEST OF ISSUE ERGMEgo#1.
+#
+# This is `sqrt(diag(Sigma_design))`, the survey variance of the target
+# statistics: a function of the 205 per-ego contributions and their weights
+# and NOTHING else -- no estimator, no MCMC, no I^-1 sandwich to blame a
+# disagreement on. ERGMEgo.jl's `_design_cov` is compared to it directly,
+# and to the full covariance matrix `design_cov` (off-diagonal included).
+#
+# HISTORY (issue ERGMEgo#1, answered by this fixture and FIXED): the first
+# run of this fixture found ERGMEgo.jl's design variance too small by
+# exactly the factor (n-1)/n -- `_design_cov` divided the sum of squared
+# deviations by n where the survey (SRS / Horvitz-Thompson) variance of a
+# mean, which ergm.ego computes, divides by n-1. The Bessel factor is now
+# applied, and the Julia testset pins it with an independent Bessel
+# reference (Statistics.cov) and a hand-computed weighted case, so the
+# correction cannot be removed silently.
+#
+# The design standard errors are therefore asserted EXACTLY: 1e-9 on
+# numbers of size 15.2 and 13.6 is agreement to 11 significant digits, the
+# floating-point floor of two different summation orders. There is no gap
+# to admit and no tolerance to justify.
+design_std_errors = 1e-9
+#
+# DESIGN STANDARD ERRORS OF THE COEFFICIENTS WITH THE EXACT INFORMATION.
+#
+# `design_se_exact = sqrt(diag(I^-1 Sigma_design I^-1))` with I the exact
+# Fisher information of the plain (non-egocentric) ERGM of the same model
+# on the same network -- dyad-independent, so MPLE = MLE and
+# `vcov(ergm(...))` is I^-1 with no MCMC in it. Both factors are
+# deterministic. ERGM.jl's MPLE reproduces R's vcov to ~1e-6 (the Newton
+# convergence tolerance of two different optimisers), and the Julia
+# testset rebuilds the sandwich from `inv(vcov(fit_ergm(...)))` and its own
+# `_design_cov`; 1e-6 on numbers of size 0.16 is what those two
+# optimisers leave.
+design_se_exact = 1e-6
+plain_ergm_vcov = 1e-6
+plain_ergm_mple = 1e-6
+#
+# FITTED COEFFICIENTS -- AND A PARAMETERIZATION DIFFERENCE THAT MUST BE
+# MAPPED, NOT ASSUMED AWAY.
+#
+# ergm.ego splits the population edges parameter into a FIXED OFFSET
+# `netsize.adj` = -log(popsize) = -5.3230 plus a free `edges` coefficient
+# (-0.6974). ERGMEgo.jl reports a single edges coefficient on the
+# pseudo-population scale, with its own adjustment -log(N/m), which under
+# this census (N = m = 205) is 0. The two numbers are therefore NOT
+# comparable term-by-term: R's -0.6974 and Julia's -6.03 are the same
+# parameter in different parameterizations. The quantity both packages
+# estimate is netsize.adj + edges = -6.0204, frozen below as
+# `mle_coefficients_population`, and it is what the Julia testset compares
+# against. (Cross-check: a plain ERGM.jl MPLE of edges + nodematch on the
+# same 205-node network gives -6.034 / 2.831 -- which is what a census
+# SHOULD reduce to, and it does.)
+#
+# Both sides are moment-matching by MCMC. Measured spreads (ERGMEgo.jl
+# under its 2026-09 defaults: ERGM.jl's t-ratio + Hotelling convergence
+# rule, dyad-scaled burnin 20*n_dyads / interval n_dyads/10, 3000 draws,
+# effective sample size 120-180 per draw):
+#   ergm.ego seed-to-seed sd : 0.0100 (edges), 0.0098 (nodematch)
+#   ERGMEgo.jl seed-to-seed sd: 0.026, 0.026 (was 0.040/0.044 under the
+#                               pre-panel 1 % relative-change rule;
+#                               0.012/0.012 over six seeds since round 2
+#                               made the passing sample the final one)
+#   |mean(ERGMEgo.jl, 5 seeds) - R| : 0.010, 0.012 (was 0.052/0.047)
+# The combined Monte-Carlo sd of the two means is
+# sqrt(0.026^2/5 + 0.010^2) = 0.015, so the observed gap is 0.7-0.8 of it:
+# no systematic difference is detectable any more (the earlier 0.052 gap
+# was the relative-change rule stopping at the noise level, not the
+# pseudo-population construction).
+#
+# 0.05 is >= 3x the combined Monte-Carlo sd of the two means (0.046) and
+# >= 2x the larger observed gap (0.024); it is 0.28 of the smaller fitted
+# standard error. Both sides are seeded, so the comparison is
+# deterministic and cannot flake.
+mle_coefficients_population = 0.05
+#
+# STANDARD ERRORS OF THE COEFFICIENTS -- MONTE-CARLO ON BOTH SIDES.
+#
+# `mle_std_errors` and `mle_se_design_component` sandwich the (exact)
+# design covariance with an MCMC ESTIMATE of the information, on both
+# sides: ergm.ego's DtDe (frozen as `r_DtDe`) and ERGMEgo.jl's covariance
+# of its final sample. Neither is the exact information: R's DtDe puts
+# solve(DtDe)[1,1] = 0.02853 against the exact I^-1[1,1] = 0.02506 (12 %
+# high), so R's design SE (0.1779 / 0.1954) sits 0.022 / 0.019 above the
+# exact `design_se_exact` (0.1563 / 0.1760); ERGMEgo.jl's per-fit design SE
+# has mean 0.160 / 0.177 and seed-to-seed sd 0.013 / 0.009 over the five
+# replication seeds, i.e. it scatters around the exact value with R's DtDe
+# 1.4 sd above it. The largest per-fit |Julia - R| observed is 0.039.
+#
+# 0.06 = R's 0.022 offset from the exact value + 3 x ERGMEgo.jl's 0.013
+# per-fit sd. It is applied per fit (every one of the five seeds must
+# pass), and separately the five-seed MEAN SE is held to it as well. The
+# estimation component is NOT held to a tolerance: it is I^-1/n_eff and
+# n_eff is a property of each package's own chain (ERGMEgo.jl's is
+# ~150 per 3000-draw sample; ergm.ego's larger sample gives 0.0083 /
+# 0.0103); the testset asserts it is below 0.3 x the design component.
+mle_std_errors = 0.06
+mle_se_design_component = 0.06
+
+[values]
+# --- the network, frozen. Julia rebuilds the census egodata from it. ----
+n_actors = 205
+directed = false
+grade = [7, 7, 11, 8, 10, 10, 8, 11, 9, 9, 9, 11, 9, 11, 8, 10, 10, 7, 10, 7, 12, 8, 8, 9, 7, 9, 9, 9, 8, 11, 7, 9, 12, 10, 11, 8, 8, 7, 7, 10, 8, 9, 7, 12, 9, 10, 10, 8, 8, 8, 8, 7, 11, 9, 8, 7, 7, 12, 11, 7, 11, 10, 7, 8, 11, 8, 9, 10, 10, 7, 7, 7, 7, 12, 10, 8, 7, 7, 9, 7, 11, 8, 11, 7, 8, 8, 7, 7, 11, 7, 10, 7, 9, 8, 7, 7, 8, 9, 9, 7, 9, 12, 8, 11, 8, 8, 10, 9, 9, 7, 9, 7, 9, 7, 9, 11, 7, 8, 7, 11, 8, 9, 8, 11, 7, 12, 7, 8, 7, 7, 11, 7, 7, 7, 9, 11, 7, 7, 8, 12, 8, 9, 9, 11, 8, 9, 7, 10, 9, 7, 7, 7, 9, 10, 7, 7, 8, 7, 9, 11, 7, 8, 10, 9, 9, 11, 8, 11, 9, 9, 8, 8, 9, 7, 7, 12, 12, 9, 7, 7, 9, 12, 7, 7, 7, 10, 10, 8, 8, 7, 10, 9, 8, 10, 7, 7, 9, 7, 9, 10, 12, 11, 10, 10, 9]
+edge_src = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 5, 8, 8, 8, 9, 9, 9, 9, 11, 11, 13, 13, 14, 15, 15, 15, 15, 16, 16, 17, 18, 18, 18, 18, 21, 21, 21, 22, 22, 22, 22, 22, 23, 25, 25, 25, 25, 25, 25, 27, 27, 29, 29, 30, 30, 30, 31, 31, 32, 33, 34, 34, 36, 36, 38, 43, 43, 44, 44, 47, 47, 47, 47, 47, 47, 47, 47, 47, 51, 51, 52, 52, 53, 53, 54, 55, 55, 55, 55, 55, 56, 56, 57, 58, 59, 59, 63, 64, 64, 64, 64, 65, 66, 66, 70, 70, 74, 74, 75, 75, 78, 79, 79, 79, 79, 81, 83, 87, 87, 87, 87, 87, 87, 87, 87, 88, 89, 89, 90, 91, 92, 96, 96, 96, 96, 96, 98, 99, 99, 100, 100, 101, 102, 102, 103, 103, 104, 105, 108, 109, 109, 110, 112, 114, 114, 115, 123, 123, 123, 123, 124, 124, 124, 125, 127, 127, 129, 132, 132, 134, 136, 137, 138, 138, 139, 139, 140, 140, 142, 146, 148, 149, 149, 153, 158, 160, 160, 161, 164, 165, 165, 165, 179, 181, 183, 189]
+edge_dst = [25, 52, 58, 70, 87, 92, 96, 100, 110, 127, 151, 161, 174, 52, 100, 134, 190, 204, 30, 104, 160, 19, 54, 115, 205, 44, 74, 61, 153, 182, 22, 55, 76, 189, 40, 140, 122, 63, 129, 158, 195, 59, 102, 140, 55, 64, 76, 123, 189, 36, 43, 60, 77, 87, 92, 147, 68, 93, 51, 55, 54, 104, 160, 114, 185, 178, 140, 187, 200, 97, 167, 155, 60, 77, 74, 136, 74, 79, 102, 105, 139, 153, 189, 191, 201, 55, 61, 127, 190, 83, 136, 115, 61, 66, 86, 123, 157, 71, 129, 133, 149, 65, 104, 198, 66, 123, 139, 157, 104, 82, 157, 158, 195, 136, 176, 187, 204, 137, 99, 108, 164, 173, 131, 136, 88, 92, 96, 110, 127, 156, 179, 183, 183, 111, 131, 117, 187, 110, 100, 110, 137, 150, 179, 192, 164, 173, 137, 150, 108, 189, 201, 128, 141, 160, 139, 173, 121, 142, 134, 185, 138, 185, 144, 139, 157, 178, 189, 142, 160, 161, 204, 150, 151, 158, 150, 185, 196, 202, 179, 180, 185, 189, 193, 160, 194, 160, 192, 194, 165, 186, 170, 195, 166, 194, 190, 173, 178, 187, 199, 196, 182, 190, 191]
+n_edges = 203
+ppopsize = 205
+popsize = 205
+
+# --- DETERMINISTIC: targets and their design variance -------------------
+term_names = ["edges", "nodematch.Grade"]
+targets = [203, 163]
+# sqrt(diag(Sigma_design)) -- the survey standard error of each TARGET
+# statistic. This is ERGMEgo.jl's `_design_cov` with every excuse removed.
+design_std_errors = [15.202231518341474, 13.630901312394398]
+# ...and the full design covariance matrix, row-major. The off-diagonal is
+# part of the claim too: an implementation that got the marginal variances
+# right and the covariance wrong would still produce wrong standard errors
+# once sandwiched by I^-1, which is not diagonal.
+design_cov = [[231.10784313725492, 189.01225490196077], [189.01225490196077, 185.8014705882353]]
+
+# --- ergm.ego's fit -----------------------------------------------------
+mle_coefficients = [-0.69741988075524575, 2.8201410539194347]
+mle_std_errors = [0.17809693425767734, 0.19571841509280516]
+netsize_adjustment = -5.3230099791384085
+
+# THE COMPARABLE QUANTITY. ergm.ego puts the population edges parameter in
+# TWO pieces -- the fixed offset netsize.adj = -log(popsize) and the free
+# `edges` coefficient -- while ERGMEgo.jl reports it as one number on the
+# pseudo-population scale. Their SUM is the same parameter, and it is what
+# the Julia testset is held to. Comparing R's -0.697 against Julia's -6.07
+# term-by-term would be comparing two different parameterizations and would
+# fail for no reason at all.
+mle_coefficients_population = [-6.0204298598936541, 2.8201410539194347]
+# Sanity: a plain (non-egocentric) ERGM MPLE of edges + nodematch("Grade")
+# on the same 205-node network. A CENSUS ego fit must reduce to this, and
+# both packages do. Frozen as an independent anchor on the number above.
+plain_ergm_mple = [-6.034044994640813, 2.8309993296775215]
+# ...and its covariance vcov(ergm(...)), row-major: the EXACT inverse Fisher
+# information (dyad-independent model, MPLE = MLE, no MCMC).
+plain_ergm_vcov = [0.025059841114461009, -0.025059841114461006, -0.025059841114461006, 0.031444124825054411]
+# sqrt(diag(I^-1 Sigma_design I^-1)) with that EXACT I: the design standard
+# error of the coefficients with every Monte-Carlo excuse removed.
+design_se_exact = [0.15626735806297307, 0.17596932320118339]
+
+# ergm.ego's OWN decomposition of its standard errors. Note the ratio: the
+# design component is ~17x the estimation component, so essentially ALL of
+# an ergm.ego standard error IS the design variance. That is why issue #1
+# is not a footnote.
+mle_se_design_component = [0.17790167245948862, 0.1954488664343646]
+mle_se_estimation_component = [0.0083374413401398999, 0.010268330729066171]
+# ergm.ego's MCMC estimate of the information (fit$DtDe, row-major): the
+# matrix whose inverse sandwiches design_cov to give the design component
+# above. Compare its inverse with plain_ergm_vcov to see how much one MCMC
+# estimate of I moves a standard error (~12 % here).
+r_DtDe = [190.44811556009736, 155.3617841375779, 155.3617841375779, 155.32657672912137]
+
+# ergm.ego disagreeing with ITSELF over five further seeds: the Monte-Carlo
+# floor under the coefficient tolerance.
+mcmle_seed_sd = [0.010048644672552646, 0.0097579469722167619]
+mcmle_seed_mean = [-0.71470976963151955, 2.8339381953881646]

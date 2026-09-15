@@ -400,6 +400,8 @@ naming/StatsAPI/GOF conventions.
 
 ### Changed
 
+- Documentation uses the default Documenter themes, with a new package-specific
+  SVG icon and browser favicon in the official Julia logo colors.
 - **Graphs.jl is no longer a dependency.** Every graph primitive the package
   uses (`nv`, `neighbors`, `has_edge`, `vertices`) is Networks.jl's
   re-export; `using Graphs` and the `[deps]`/`[compat]` entries were dead.

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">ERGMEgo.jl</title>
+  <desc id="desc">A focal ego surrounded by its immediate alters: inference from egocentric samples.</desc>
+  <path d="M128 128V36M128 128 218 102M128 128 184 210M128 128 72 210M128 128 38 102" fill="none" stroke="#4063D8" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="128" cy="36" r="19" fill="#389826"/>
+  <circle cx="218" cy="102" r="19" fill="#9558B2"/>
+  <circle cx="184" cy="210" r="19" fill="#CB3C33"/>
+  <circle cx="72" cy="210" r="19" fill="#389826"/>
+  <circle cx="38" cy="102" r="19" fill="#CB3C33"/>
+  <circle cx="128" cy="128" r="38" fill="none" stroke="#4063D8" stroke-width="10"/>
+  <circle cx="128" cy="128" r="23" fill="#4063D8"/>
+</svg>

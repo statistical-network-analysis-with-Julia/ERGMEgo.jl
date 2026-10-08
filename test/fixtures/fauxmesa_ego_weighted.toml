@@ -1,0 +1,122 @@
+name = "fauxmesa_ego_weighted"
+
+[provenance]
+r_version = "4.6.1"
+ergm_ego_version = "1.1.4"
+ergm_version = "4.12.0"
+network_version = "1.20.0"
+seed = 20260912
+script = "test/fixtures/r/fauxmesa_ego_weighted.R"
+date = "2026-09-12"
+dataset = "ergm::faux.mesa.high: 205 students, 203 undirected friendship ties, Grade 7-12"
+sampling_design = "WEIGHTED SUBSAMPLE: egos 1, 4, 7, ..., 205 (every third actor, 69 egos) of as.egor(faux.mesa.high), case weights Grade - 6 (1 to 6), ppopsize = popsize = 205 (netsize.adj = 0). Deterministic ego set, unequal weights: the Hajek targets, the design variance of a weighted mean and the weight-proportional pseudo-population all enter, which the census fixture cannot exercise."
+model = "egor ~ edges + nodematch(\"Grade\") fitted by ergm.ego (popsize = 205, control.ergm.ego(ppopsize = 205)); targets and design covariance frozen for edges + nodematch(\"Grade\") + gwdegree(0.5, fixed = TRUE) + triangle"
+replication_seeds = "101,202,303,404,505"
+
+[tolerance]
+# WEIGHTED TARGETS (edges, nodematch.Grade, gwdeg.fixed.0.5, triangle,
+# scaled to 205). Hajek estimates: 205 * sum(w_i h_i) / sum(w_i) with the
+# per-ego contributions degree/2, matches/2, e^a(1-(1-e^-a)^degree) and
+# alter-alter ties/3. Deterministic; 1e-9 on numbers of size 56-210 is
+# agreement to 11 significant digits, the floor of two summation orders.
+targets = 1e-9
+#
+# DESIGN STANDARD ERRORS OF THE TARGETS, sqrt(diag(Sigma_design)), and the
+# full 4x4 Sigma_design (off-diagonal included): the with-replacement
+# variance of a WEIGHTED mean, m^2 n/(n-1) sum_i w_i^2 (h_i - hbar)(h_i - hbar)'
+# with normalised weights -- the survey variance ergm.ego computes for a
+# design with unequal case weights. Deterministic; asserted exactly.
+design_std_errors = 1e-9
+#
+# THE PSEUDO-POPULATION'S COMPOSITION BY GRADE (ppop_grade_counts): egos
+# replicated in proportion to their weights, 205 vertices in all.
+# ergm.ego's ppop.wt = "round" and ERGMEgo.jl's largest-remainder rounding
+# give the same counts here; asserted exactly (integers).
+ppop_grade_counts = 0.5
+#
+# EXACT INFORMATION at ergm.ego's estimate on that pseudo-population and
+# the design SE it implies (design_se_exact): a closed-form dyad sum with
+# no estimator in it, reproducible in Julia from the frozen counts and
+# coefficients to machine precision.
+exact_information = 1e-6
+design_se_exact = 1e-9
+#
+# FITTED POPULATION-SCALE COEFFICIENTS -- MONTE-CARLO ON BOTH SIDES.
+# Both packages are moment-matching by MCMC from the same targets. Measured
+# spreads on this design:
+#   ergm.ego seed-to-seed sd (5 seeds)   : 0.0070 (edges), 0.0084 (nodematch)
+#   ERGMEgo.jl seed-to-seed sd (10 seeds): 0.0093, 0.0103
+#   ergm.ego 5-seed mean                 : -5.6035, 2.2894
+#   ERGMEgo.jl 10-seed mean              : -5.6032, 2.2906
+# The two means differ by 0.0003 / 0.001 -- well inside the combined
+# Monte-Carlo sd of the two means (sqrt(0.0070^2/5 + 0.0093^2/10) = 0.004):
+# no systematic difference is detectable. A SINGLE Julia fit is held to the
+# single frozen R fit at 0.05: the combined single-fit sd is
+# sqrt(0.0070^2 + 0.0093^2) = 0.012, so 0.05 is 4x it (and 0.2 of the
+# smaller fitted standard error; the largest single-fit gap seen over ten
+# Julia seeds was 0.026). The 3-seed Julia mean is held to ergm.ego's 5-seed
+# mean at 0.03 (5x the combined sd of the two means, 0.006). Both sides are
+# seeded: deterministic, cannot flake.
+mle_coefficients_population = 0.05
+mcmle_seed_mean = 0.03
+#
+# STANDARD ERRORS -- MONTE-CARLO ON BOTH SIDES. Each package sandwiches the
+# (exact) design covariance with ITS OWN MCMC estimate of the information.
+# R's DtDe puts the design SE at 0.2366 / 0.2510 against the exact 0.2349 / 0.2548
+# (ergm.ego 5-seed SE mean 0.2378 / 0.2658, sd 0.0209 / 0.0213); ERGMEgo.jl's
+# per-fit SE has mean 0.243 / 0.262 and sd 0.024 / 0.022 over 10 seeds, i.e.
+# both scatter around the exact value (the census fixture's 12 % offset of
+# R's DtDe does not recur here). The information is the covariance of the
+# ONE sample that passed the convergence tests (n_eff ~ 110-170), so the
+# Julia per-fit SE carries that sample's noise: the largest |Julia - exact|
+# over ten seeds was 0.050 / 0.042 and the largest |Julia - R| 0.048 / 0.038.
+# 0.08 is > 3x the Julia per-fit sd (0.072) and R's offset from the exact
+# value + 3x that sd, rounded up; it is 0.3 of the standard error. Applied
+# per fit (three seeds) to the design component and to the total; the
+# estimation component is not held to a tolerance (I^-1/n_eff is a
+# property of each package's own chain) beyond being < 0.3x the design part.
+mle_std_errors = 0.08
+mle_se_design_component = 0.08
+
+[values]
+# --- the design, frozen. Julia rebuilds the EgoData from the bundled
+# load_dataset(:faux_mesa_high): egos `ego_ids` with weights `weights`. ---
+n_actors = 205
+ego_ids = [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61, 64, 67, 70, 73, 76, 79, 82, 85, 88, 91, 94, 97, 100, 103, 106, 109, 112, 115, 118, 121, 124, 127, 130, 133, 136, 139, 142, 145, 148, 151, 154, 157, 160, 163, 166, 169, 172, 175, 178, 181, 184, 187, 190, 193, 196, 199, 202, 205]
+weights = [1, 2, 2, 3, 3, 4, 4, 2, 1, 3, 1, 4, 2, 4, 1, 4, 2, 1, 2, 6, 5, 2, 3, 1, 1, 2, 3, 2, 2, 1, 4, 2, 2, 1, 2, 2, 3, 1, 3, 2, 2, 5, 1, 1, 1, 5, 2, 3, 2, 4, 1, 4, 2, 5, 4, 5, 3, 2, 1, 3, 3, 1, 4, 1, 2, 1, 3, 5, 3]
+n_egos = 69
+ppopsize = 205
+popsize = 205
+
+# --- DETERMINISTIC: weighted targets and their design covariance --------
+term_names = ["edges", "nodematch.Grade", "gwdeg.fixed.0.5", "triangle"]
+targets = [209.68571428571428, 148.18571428571428, 199.61597584055338, 56.228571428571435]
+design_std_errors = [29.876900803150477, 23.228900956338123, 17.049504772677675, 14.213646290865068]
+design_cov = [[892.62920160129363, 611.25592038023376, 381.71647782879563, 374.81204408261272], [611.25592038023376, 539.58183963936608, 225.88184781195167, 288.35438851752946], [381.71647782879563, 225.88184781195167, 290.68561299355889, 110.52696280358931], [374.81204408261272, 288.35438851752946, 110.52696280358931, 202.0277408818223]]
+
+# --- DETERMINISTIC: the pseudo-population and the exact information -----
+# vertices per grade 7..12 of the 205-vertex pseudo-population
+ppop_grade_counts = [18, 42, 52, 50, 36, 7]
+n_same_grade_dyads = 4216
+# I at mle_coefficients_population, row-major
+exact_information = [206.22312657675718, 144.58066946442457, 144.58066946442457, 144.58066946442457]
+design_se_exact = [0.23491916344576563, 0.25478544873703696]
+
+# --- ergm.ego's fit of edges + nodematch("Grade") -------------------------
+mle_coefficients = [-5.5940275545610083, 2.2936335768646505]
+netsize_adjustment = 0
+# netsize.adj + edges, nodematch: the population-scale parameter both
+# packages estimate (the offset is 0 here, so this equals mle_coefficients)
+mle_coefficients_population = [-5.5940275545610083, 2.2936335768646505]
+mle_std_errors = [0.2367164775436644, 0.25124323440113655]
+mle_se_design_component = [0.23663049624351773, 0.25102048824872203]
+mle_se_estimation_component = [0.0063795758657378089, 0.010577207179480901]
+# ergm.ego's MCMC estimate of the information (fit$DtDe, row-major)
+r_DtDe = [195.65431806628075, 136.61374879896636, 136.61374879896636, 139.24055912597251]
+
+# ergm.ego over five further seeds: the Monte-Carlo floor under the
+# coefficient tolerance
+mcmle_seed_sd = [0.0069897242986137961, 0.008375576868851136]
+mcmle_seed_mean = [-5.6035205253563003, 2.2894092750910513]
+mcmle_se_seed_sd = [0.020850536155919579, 0.021298248326562616]
+mcmle_se_seed_mean = [0.23783073866831508, 0.26579909135642232]

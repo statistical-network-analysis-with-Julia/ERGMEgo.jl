@@ -1,0 +1,146 @@
+name = "ego_mixing_esp"
+
+[provenance]
+r_version = "4.6.1"
+ergm_ego_version = "1.1.4"
+ergm_version = "4.12.0"
+network_version = "1.20.0"
+seed = 20261007
+script = "test/fixtures/r/ego_mixing_esp.R"
+date = "2026-10-07"
+dataset = "ergm::faux.mesa.high: 205 students, 203 undirected friendship ties; attributes Grade (7-12), Race, Sex"
+model = "targets of esp(0:3) + mm(Race) + mm(Sex) + concurrent (census), of esp(0:3) + concurrent (weighted sub-design), of mm(Race) + mm(Sex) (unweighted sub-design) and of mm(Race) (the egos who are not Black; the egos without the Other student friend); fits on the census (popsize 205) of the ergm.ego help-page model with gwesp(0, fixed = TRUE), of edges + mm(Sex), edges + nodematch(Grade) + concurrent and edges + nodematch(Grade) + esp(1), of edges + nodematch(Grade) + gwdegree(0, fixed = TRUE) on the census without isolates (gwdeg.fixed.0 at its largest value), and of edges + esp(1) on the unweighted 69-ego sub-design at ergm.ego default popsize and ppopsize"
+replication_seeds = "101,202,303,404,505,606,707,808"
+
+[tolerance]
+# TARGETS: deterministic weighted means of per-ego contributions, scaled
+# to 205; 1e-9 is agreement to the floor of two summation orders.
+targets = 1e-9
+# DESIGN COVARIANCE of the weighted targets: 1e-9 RELATIVE TO ITS LARGEST
+# ENTRY, i.e. max|S_J - S_R| <= design_cov_rel * max|S_R|.
+design_cov_rel = 1e-9
+#
+# FITS: the rules of ego_terms.toml, from R's own seed spread.
+# COEFFICIENTS: |mean_J - mean_R| <= seed_mean_sds * sd_R * sqrt(1/n_R + 1/n_J)
+#   + seed_mean_sds * sd_R * n_failed / (n_fits + n_failed),
+# with the premise that one Julia fit is no noisier than one R fit
+# ASSERTED by the test (its seeds differ pairwise by at most
+# seed_mean_sds * sqrt(2) * sd_R). A coefficient fixed at -Inf/+Inf is
+# compared exactly.
+seed_mean_sds = 4.0
+# STANDARD ERRORS: the Julia design component (sqrt(diag(vcov_design)),
+# se=:design) is held to R's design component (*_se_model_*) by the same
+# band on its sd.
+
+[values]
+n_actors = 205
+ego_ids = [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61, 64, 67, 70, 73, 76, 79, 82, 85, 88, 91, 94, 97, 100, 103, 106, 109, 112, 115, 118, 121, 124, 127, 130, 133, 136, 139, 142, 145, 148, 151, 154, 157, 160, 163, 166, 169, 172, 175, 178, 181, 184, 187, 190, 193, 196, 199, 202, 205]
+weights = [1, 2, 2, 3, 3, 4, 4, 2, 1, 3, 1, 4, 2, 4, 1, 4, 2, 1, 2, 6, 5, 2, 3, 1, 1, 2, 3, 2, 2, 1, 4, 2, 2, 1, 2, 2, 3, 1, 3, 2, 2, 5, 1, 1, 1, 5, 2, 3, 2, 4, 1, 4, 2, 5, 4, 5, 3, 2, 1, 3, 3, 1, 4, 1, 2, 1, 3, 5, 3]
+nonblack_ego_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 119, 120, 121, 122, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 205]
+nofriend_ego_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 155, 156, 157, 158, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205]
+
+# --- (a) targets, scaled to 205 ------------------------------------------
+term_names = ["esp0", "esp1", "esp2", "esp3", "mm[Race=Black,Race=Hisp]", "mm[Race=Hisp,Race=Hisp]", "mm[Race=Black,Race=NatAm]", "mm[Race=Hisp,Race=NatAm]", "mm[Race=NatAm,Race=NatAm]", "mm[Race=Black,Race=Other]", "mm[Race=Hisp,Race=Other]", "mm[Race=NatAm,Race=Other]", "mm[Race=Other,Race=Other]", "mm[Race=Black,Race=White]", "mm[Race=Hisp,Race=White]", "mm[Race=NatAm,Race=White]", "mm[Race=Other,Race=White]", "mm[Race=White,Race=White]", "mm[Sex=F,Sex=M]", "mm[Sex=M,Sex=M]", "concurrent"]
+census_targets = [83, 70, 36, 13, 8, 53, 13, 41, 46, 0, 1, 0, 0, 5, 22, 10, 0, 4, 71, 50, 97]
+weighted_names = ["esp0", "esp1", "esp2", "esp3", "concurrent"]
+weighted_targets = [93.128571428571433, 74.971428571428575, 32.214285714285715, 8.7857142857142865, 96.057142857142864]
+weighted_design_cov = [[152.09361329936064, -12.80854788004998, -11.081997750937106, -1.0400562020726667, 94.398910920449836], [-12.80854788004998, 341.84612716662184, 114.96286804762723, 11.950700431192891, 150.1236445520249], [-11.081997750937106, 114.96286804762723, 146.68486637920481, 12.340011086067085, 54.447226346865286], [-1.0400562020726667, 11.950700431192891, 12.340011086067085, 16.194754906044029, 9.1985298527574315], [94.398910920449836, 150.1236445520249, 54.447226346865286, 9.1985298527574315, 197.06325646274826]]
+r_error_mm_weighted = "ℹ In index: 1. Caused by error in `rep()`: ! invalid 'times' argument"
+sub_mm_names = ["mm[Race=Black,Race=Hisp]", "mm[Race=Hisp,Race=Hisp]", "mm[Race=Black,Race=NatAm]", "mm[Race=Hisp,Race=NatAm]", "mm[Race=NatAm,Race=NatAm]", "mm[Race=Black,Race=White]", "mm[Race=Hisp,Race=White]", "mm[Race=NatAm,Race=White]", "mm[Race=White,Race=White]", "mm[Sex=F,Sex=M]", "mm[Sex=M,Sex=M]"]
+sub_mm_targets = [10.398550724637682, 63.876811594202898, 11.884057971014492, 46.050724637681157, 46.050724637681157, 5.9420289855072461, 22.282608695652172, 7.4275362318840585, 5.9420289855072461, 62.391304347826093, 54.963768115942031]
+nonblack_mm_names = ["mm[Race=Black,Race=Hisp]", "mm[Race=Hisp,Race=Hisp]", "mm[Race=Black,Race=NatAm]", "mm[Race=Hisp,Race=NatAm]", "mm[Race=NatAm,Race=NatAm]", "mm[Race=Black,Race=Other]", "mm[Race=Hisp,Race=Other]", "mm[Race=NatAm,Race=Other]", "mm[Race=Other,Race=Other]", "mm[Race=Black,Race=White]", "mm[Race=Hisp,Race=White]", "mm[Race=NatAm,Race=White]", "mm[Race=Other,Race=White]", "mm[Race=White,Race=White]"]
+nonblack_mm_targets = [4.1206030150753765, 54.597989949748744, 6.6959798994974884, 42.236180904522612, 47.386934673366838, 0, 1.0301507537688441, 0, 0, 2.5753768844221105, 22.663316582914575, 10.301507537688442, 0, 4.1206030150753765]
+nofriend_mm_names = ["mm[Race=Black,Race=Hisp]", "mm[Race=Hisp,Race=Hisp]", "mm[Race=Black,Race=NatAm]", "mm[Race=Hisp,Race=NatAm]", "mm[Race=NatAm,Race=NatAm]", "mm[Race=Black,Race=Other]", "mm[Race=Hisp,Race=Other]", "mm[Race=NatAm,Race=Other]", "mm[Race=Other,Race=Other]", "mm[Race=Black,Race=White]", "mm[Race=Hisp,Race=White]", "mm[Race=NatAm,Race=White]", "mm[Race=Other,Race=White]", "mm[Race=White,Race=White]"]
+nofriend_mm_targets = [8.1592039800995018, 54.054726368159209, 13.258706467661691, 41.305970149253731, 46.915422885572141, 0, 0.50995024875621886, 0, 0, 5.099502487562189, 22.437810945273633, 10.199004975124378, 0, 4.0796019900497509]
+
+# --- (b) the help-page model with gwesp(0), census, popsize 205 ----------
+helppage_names = ["edges", "degree0", "degree1", "degree2", "degree3", "nodefactor.Race.Hisp", "nodefactor.Race.NatAm", "nodefactor.Race.Other", "nodefactor.Race.White", "nodematch.Race", "nodefactor.Sex.M", "nodematch.Sex", "absdiff.Grade", "gwesp.fixed.0"]
+helppage_mean = [-2.9895199059248334, -0.22200297030112187, 0.060027295195097974, -0.21437047906005754, 0.13401871901492787, -1.1570352921202893, -0.8887093946319814, -2.2653905096187836, -0.61540205296970041, 0.71943310421230355, -0.1530431570657744, 0.54613434191567267, -1.087424008341767, 1.6011654507846631]
+helppage_sd = [0.02025442825023567, 0.023067872079524127, 0.016212028968033108, 0.013142025071424489, 0.0052013863150055604, 0.0079446745415821945, 0.0075899732547599214, 0.036957736934496409, 0.012592753720300496, 0.0032385701726164377, 0.0035235618501711936, 0.0030049607501368486, 0.0036640647946070289, 0.0023126184925011265]
+helppage_se_mean = [0.33449978869261232, 0.78149269139819977, 0.61379138495805075, 0.5157605602464449, 0.39283383653460374, 0.16261856709814643, 0.15348625972329141, 0.66158728142160095, 0.18172269695279791, 0.099109762693456074, 0.069496876339177505, 0.095823894208438412, 0.10991098344458157, 0.12544739094883797]
+helppage_se_sd = [0.012361341850617014, 0.029610372287911309, 0.024299709934943022, 0.023591320404560249, 0.015450548317295403, 0.0038181106284380572, 0.0031386970104144039, 0.016355873768775536, 0.0042944995071974978, 0.0030227680863062728, 0.0031610554054102786, 0.0038720667494029659, 0.0013146448012586955, 0.0033714468540602901]
+helppage_se_model_mean = [0.33417784888406044, 0.78132092654287189, 0.61365407728455723, 0.5156607209328693, 0.39276325103361942, 0.16244293513524521, 0.15330456945314047, 0.66120522744628407, 0.18153715686027153, 0.099000430162380498, 0.069441890799220099, 0.095730384658456014, 0.10987509148516827, 0.12541398336685342]
+helppage_se_model_sd = [0.012348981653917927, 0.029608037672884412, 0.024298675182953908, 0.023590229982555718, 0.015449308003169099, 0.0038257828592696166, 0.0031381839280867499, 0.016366790683178995, 0.0042859123620095059, 0.0030365352052874697, 0.0031726138976951217, 0.0038760729157518762, 0.0013137604568950905, 0.0033726414696916215]
+helppage_netsize_adj = 0
+helppage_ppopsize = 205
+helppage_seconds = [36.5, 25.7, 74.7, 27.6, 32.0, 23.6]
+helppage_n_fits = 6
+helppage_n_failed = 2
+helppage_n_timeout = 2
+
+# --- (c) edges + mm(Sex), census, popsize 205 ----------------------------
+mm_names = ["edges", "mm[Sex=F,Sex=M]", "mm[Sex=M,Sex=M]"]
+mm_mean = [-4.0601286247168904, -0.9292926943541846, -0.64428798478834515]
+mm_sd = [0.0081175354059134612, 0.011681550620401975, 0.013544106839357478]
+mm_se_mean = [0.15775913559278321, 0.18627926742784973, 0.2354102074138501]
+mm_se_sd = [0.015177567229562081, 0.016388276659329563, 0.022743791768717742]
+mm_se_model_mean = [0.15749447015103327, 0.18589462279553806, 0.23504926056312994]
+mm_se_model_sd = [0.015153211896277611, 0.01632684548712993, 0.022714381269187092]
+mm_netsize_adj = 0
+mm_ppopsize = 205
+mm_seconds = [0.8, 0.9, 1.0, 1.3, 0.3, 1.1, 0.4, 0.4]
+mm_n_fits = 8
+mm_n_failed = 0
+mm_n_timeout = 0
+
+# --- (d) edges + nodematch(Grade) + concurrent, census, popsize 205 ------
+concurrent_names = ["edges", "nodematch.Grade", "concurrent"]
+concurrent_mean = [-5.5287957020579839, 2.7641042944129648, -0.95146854802511871]
+concurrent_sd = [0.0057187950278900918, 0.0069522776108952777, 0.0094409393000481293]
+concurrent_se_mean = [0.20116927580184304, 0.17441669665650089, 0.22777962868954751]
+concurrent_se_sd = [0.015462942556109003, 0.011270329995453575, 0.016612721788423261]
+concurrent_se_model_mean = [0.2010062484691468, 0.17421147520265343, 0.22756240795800409]
+concurrent_se_model_sd = [0.015454449922681296, 0.011272223752682007, 0.016612769427783138]
+concurrent_netsize_adj = 0
+concurrent_ppopsize = 205
+concurrent_seconds = [1.7, 1.6, 2.3, 2.2, 1.5, 1.5, 1.9, 1.6]
+concurrent_n_fits = 8
+concurrent_n_failed = 0
+concurrent_n_timeout = 0
+
+# --- (e) edges + nodematch(Grade) + esp(1), census, popsize 205 ----------
+esp_names = ["edges", "nodematch.Grade", "esp1"]
+esp_mean = [-6.1370650309138828, 2.4572055404688586, 1.0664839635381163]
+esp_sd = [0.0079926038184141793, 0.0092459183785706042, 0.0058313170418163871]
+esp_se_mean = [0.14190952639303078, 0.18116865662637369, 0.10058347838834696]
+esp_se_sd = [0.0064576036289494716, 0.0065756663128968421, 0.0062811422294376876]
+esp_se_model_mean = [0.14171170401746788, 0.18091178134593336, 0.10044528333572766]
+esp_se_model_sd = [0.0064349295700832651, 0.0065682833865285499, 0.0063013293597768512]
+esp_netsize_adj = 0
+esp_ppopsize = 205
+esp_seconds = [3.8, 3.5, 4.7, 2.1, 2.3, 2.1, 2.3, 2.3]
+esp_n_fits = 8
+esp_n_failed = 0
+esp_n_timeout = 0
+
+# --- (f) gwdeg.fixed.0 at its top: the census without its isolates -------
+noniso_ego_ids = [1, 2, 5, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 25, 27, 29, 30, 31, 32, 33, 34, 36, 38, 40, 43, 44, 47, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 63, 64, 65, 66, 68, 70, 71, 74, 75, 76, 77, 78, 79, 81, 82, 83, 86, 87, 88, 89, 90, 91, 92, 93, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 108, 109, 110, 111, 112, 114, 115, 117, 121, 122, 123, 124, 125, 127, 128, 129, 131, 132, 133, 134, 136, 137, 138, 139, 140, 141, 142, 144, 146, 147, 148, 149, 150, 151, 153, 155, 156, 157, 158, 160, 161, 164, 165, 166, 167, 170, 173, 174, 176, 178, 179, 180, 181, 182, 183, 185, 186, 187, 189, 190, 191, 192, 193, 194, 195, 196, 198, 199, 200, 201, 202, 204, 205]
+top_names = ["edges", "nodematch.Grade", "gwdeg.fixed.0"]
+top_mean = [-5.6094344185749661, 2.8949189459803697, inf]
+top_sd = [0.010554352952304362, 0.0152113235592575, 0]
+top_se_mean = [0.17645188922373931, 0.18189556397622242, 0]
+top_se_sd = [0.010425103924840811, 0.016996342373585792, 0]
+top_se_model_mean = [0.17614550236520582, 0.18144161001332665, 0]
+top_se_model_sd = [0.010433866308387512, 0.017064737196186335, 0]
+top_netsize_adj = 0
+top_ppopsize = 148
+top_seconds = [1.1, 1.0, 0.9, 0.9, 0.9, 0.9, 0.9, 0.7]
+top_n_fits = 8
+top_n_failed = 0
+top_n_timeout = 0
+
+# --- (g) edges + esp(1), popsize unknown, 69 unweighted egos -------------
+esp_percap_offset_term = "offset(netsize.adj(edges = 1L, mutual = 0L, transitiveties = -0.333333333333333)) +      edges"
+esp_percap_names = ["edges", "esp1"]
+esp_percap_mean = [0.19195203866839505, -0.39740386607552519]
+esp_percap_sd = [0.0086058779409117856, 0.0076867907945720095]
+esp_percap_se_mean = [0.12322976595396931, 0.15150839323120102]
+esp_percap_se_sd = [0.016198651419735942, 0.013514092153577149]
+esp_percap_se_model_mean = [0.12298876631470478, 0.15122152569786174]
+esp_percap_se_model_sd = [0.016180306184500427, 0.013504786059052564]
+esp_percap_netsize_adj = -4.2341065045972597
+esp_percap_ppopsize = 69
+esp_percap_seconds = [1.2, 1.3, 2.5, 1.1, 1.4, 0.4, 1.0, 1.2]
+esp_percap_n_fits = 8
+esp_percap_n_failed = 0
+esp_percap_n_timeout = 0

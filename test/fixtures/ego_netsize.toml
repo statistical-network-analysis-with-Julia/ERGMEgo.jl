@@ -1,0 +1,130 @@
+name = "ego_netsize"
+
+[provenance]
+r_version = "4.6.1"
+ergm_ego_version = "1.1.4"
+ergm_version = "4.12.0"
+network_version = "1.20.0"
+seed = 20261002
+script = "test/fixtures/r/ego_netsize.R"
+date = "2026-10-02"
+dataset = "a frozen 100-vertex Bernoulli(0.04) network (edge list below) and ergm::faux.mesa.high"
+model = "ergm.ego fits with offset(netsize.adj(edges = 1, transitiveties = -1/3)): edges + triangle under popsize = ppopsize, 2 x ppopsize and the default 1; edges + nodematch(Grade) + gwdegree(0.5, fixed = TRUE) on the weighted sub-design; per-capita edges + nodematch(Grade) at two pseudo-population sizes; popsize = 2050 with ppopsize = 500"
+replication_seeds = "101,202,303,404,505,606"
+
+[tolerance]
+# DETERMINISTIC counts on fixed networks (integers and thirds).
+offset_statistic = 1e-9
+#
+# FITTED COEFFICIENTS -- MONTE-CARLO ON BOTH SIDES. The Julia side compares
+# the mean of three seeded fits with R's mean over the `rep_seeds` that
+# fitted (*_n_fits; a seed on which ergm stopped with an error is counted in
+# *_n_failed), at
+#   seed_mean_sds * sqrt(sd_R^2/n_fits + sd_J^2/3)  (sd_J = sd_R: both packages
+#   are moment-matching by MCMC from the same targets; measured Julia
+#   seed sds are of R's size or smaller),
+# floored at coef_floor_se standard errors: the two packages build
+# different pseudo-population networks and estimate E[g] by different
+# chains, which leaves an O(1/ESS) difference that R's seed spread (as low
+# as 0.003 here) does not measure. 0.15 SE is the same floor ERGM.jl's
+# MCMLE fixture argues for (0.1 SE there; the ego sandwich SE is itself
+# Monte-Carlo, with a seed sd of about 10 %).
+# The triangle model's three fits differ from one another by 0.6 to 4.2 in
+# the triangle coefficient, 30 to 200 times this tolerance.
+seed_mean_sds = 4.0
+coef_floor_se = 0.15
+#
+# STANDARD ERRORS: each package sandwiches the same design covariance with
+# its own Monte-Carlo estimate of the information; the three-seed Julia
+# mean is held to R's six-seed mean within this relative tolerance (R's own
+# seed-to-seed sd of an SE is 5-12 % here; see the *_se_sd rows).
+std_errors_rel = 0.25
+
+[values]
+# --- (a) the frozen 100-vertex network and the offset statistic ---------
+g_n = 100
+g_edge_src = [1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 4, 5, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 8, 9, 9, 11, 11, 11, 11, 12, 12, 13, 13, 13, 13, 13, 14, 14, 14, 14, 14, 14, 14, 15, 15, 15, 16, 16, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 19, 19, 19, 20, 20, 20, 21, 21, 22, 22, 23, 24, 24, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 26, 26, 27, 27, 28, 28, 28, 29, 29, 29, 30, 30, 30, 30, 31, 31, 31, 32, 33, 33, 33, 33, 35, 35, 35, 36, 36, 36, 36, 37, 37, 38, 38, 38, 38, 38, 39, 40, 40, 40, 40, 40, 41, 42, 42, 43, 44, 44, 45, 45, 45, 46, 46, 46, 47, 47, 48, 48, 48, 48, 49, 49, 52, 53, 54, 54, 54, 54, 55, 55, 55, 55, 56, 56, 58, 58, 59, 61, 63, 64, 64, 64, 65, 65, 66, 66, 67, 69, 69, 71, 73, 73, 76, 80, 80, 83, 84, 87, 92]
+g_edge_dst = [29, 43, 100, 21, 42, 43, 55, 63, 68, 89, 74, 28, 47, 56, 83, 33, 48, 59, 48, 86, 9, 32, 58, 71, 12, 35, 24, 30, 79, 85, 61, 96, 19, 40, 57, 71, 96, 38, 44, 48, 49, 50, 73, 74, 24, 37, 89, 24, 64, 90, 91, 25, 27, 45, 55, 62, 95, 36, 50, 90, 98, 29, 40, 48, 57, 59, 70, 46, 67, 87, 92, 28, 36, 37, 42, 45, 77, 99, 35, 46, 53, 76, 27, 40, 51, 72, 73, 28, 90, 38, 50, 92, 69, 71, 79, 40, 44, 72, 80, 45, 68, 75, 76, 43, 70, 77, 84, 44, 63, 88, 55, 64, 93, 100, 64, 66, 43, 56, 57, 60, 90, 55, 55, 57, 78, 85, 94, 81, 44, 50, 93, 53, 63, 49, 74, 91, 54, 83, 85, 56, 98, 74, 76, 77, 94, 60, 86, 70, 87, 71, 77, 87, 97, 71, 75, 85, 97, 66, 73, 65, 81, 61, 84, 77, 66, 81, 97, 79, 83, 74, 92, 78, 80, 90, 100, 90, 95, 91, 87, 99, 98, 92, 97, 100]
+g_edges = 184
+g_triangles = 9
+g_transitiveties = 26
+g_offset_statistic = 175.33333333333331
+fmh_transitiveties = 120
+fmh_offset_statistic = 162.99999999999997
+offset_formula = "ged ~ offset(netsize.adj(edges = 1L, mutual = 0L, transitiveties = -0.333333333333333)) + edges + triangle"
+
+# --- (b) egor ~ edges + triangle on the census of g, ppopsize = 100 -----
+# popsize = 100: offset coefficient 0
+tri_same_names = ["edges", "triangle"]
+tri_same_mean = [-3.2665146730399801, 0.083307174018093899]
+tri_same_sd = [0.0056685597561750541, 0.012170044839517752]
+tri_same_se_mean = [0.071871948775440508, 0.19317541349623787]
+tri_same_se_sd = [0.0076947642748935998, 0.019057906716001369]
+tri_same_netsize_adj = 0
+tri_same_ppopsize = 100
+tri_same_n_fits = 6
+tri_same_n_failed = 0
+# popsize = 200: offset coefficient log 2 on edges - transitiveties/3
+tri_double_names = ["edges", "triangle"]
+tri_double_mean = [-3.9514691129322186, 0.64858511920392292]
+tri_double_sd = [0.0064489959717205858, 0.016077147429787282]
+tri_double_se_mean = [0.066798130584733439, 0.16968617776894654]
+tri_double_se_sd = [0.0066670685772175142, 0.0078215581418642367]
+tri_double_netsize_adj = 0.69314718055994529
+tri_double_ppopsize = 100
+tri_double_n_fits = 6
+tri_double_n_failed = 0
+# popsize = 1 (R's default): per-capita coefficients, offset -log 100
+tri_percap_names = ["edges", "triangle"]
+tri_percap_mean = [1.3307665732047966, -4.1854938214977624]
+tri_percap_sd = [0.0051266878601461934, 0.015714677642902245]
+tri_percap_se_mean = [0.072023973770440911, 0.2438378181908934]
+tri_percap_se_sd = [0.0062810955540515533, 0.024965446055679338]
+tri_percap_netsize_adj = -4.6051701859880918
+tri_percap_ppopsize = 100
+tri_percap_n_fits = 6
+tri_percap_n_failed = 0
+
+# --- (c) weighted sub-design, edges + nodematch + gwdegree(0.5) ---------
+ego_ids = [1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61, 64, 67, 70, 73, 76, 79, 82, 85, 88, 91, 94, 97, 100, 103, 106, 109, 112, 115, 118, 121, 124, 127, 130, 133, 136, 139, 142, 145, 148, 151, 154, 157, 160, 163, 166, 169, 172, 175, 178, 181, 184, 187, 190, 193, 196, 199, 202, 205]
+weights = [1, 2, 2, 3, 3, 4, 4, 2, 1, 3, 1, 4, 2, 4, 1, 4, 2, 1, 2, 6, 5, 2, 3, 1, 1, 2, 3, 2, 2, 1, 4, 2, 2, 1, 2, 2, 3, 1, 3, 2, 2, 5, 1, 1, 1, 5, 2, 3, 2, 4, 1, 4, 2, 5, 4, 5, 3, 2, 1, 3, 3, 1, 4, 1, 2, 1, 3, 5, 3]
+gwdeg_names = ["edges", "nodematch.Grade", "gwdeg.fixed.0.5"]
+gwdeg_mean = [-4.6557222752288707, 2.1576635388307546, -1.5105601202613534]
+gwdeg_sd = [0.0067719245267314114, 0.0057623604786282787, 0.0051287770080231856]
+gwdeg_se_mean = [0.2594934726165416, 0.23073852602718073, 0.32726839764347715]
+gwdeg_se_sd = [0.016215239300733802, 0.0092972614281259733, 0.02139434116387199]
+gwdeg_netsize_adj = 0
+gwdeg_ppopsize = 205
+gwdeg_n_fits = 5
+gwdeg_n_failed = 1
+
+# --- (d) unweighted sub-design, default popsize = 1, two ppopsizes ------
+percap207_names = ["edges", "nodematch.Grade"]
+percap207_mean = [-0.67949336941753824, 2.7927580769835556]
+percap207_sd = [0.008063071405199634, 0.0086402382216555062]
+percap207_se_mean = [0.2220554501044372, 0.25705491126766267]
+percap207_se_sd = [0.011913750004625667, 0.01489545767908141]
+percap207_netsize_adj = -5.3327187932653688
+percap207_ppopsize = 207
+percap207_n_fits = 6
+percap207_n_failed = 0
+percap414_names = ["edges", "nodematch.Grade"]
+percap414_mean = [-0.68340693212731385, 2.7676952284116054]
+percap414_sd = [0.0050508479897285749, 0.0084077832589502296]
+percap414_se_mean = [0.2350017787276367, 0.2778760385818364]
+percap414_se_sd = [0.020696470071500644, 0.027918855825013897]
+percap414_netsize_adj = -6.0258659738253142
+percap414_ppopsize = 414
+percap414_n_fits = 6
+percap414_n_failed = 0
+
+# --- (e) weighted sub-design, popsize = 2050, ppopsize = 500 requested --
+big_names = ["edges", "nodematch.Grade"]
+big_mean = [-7.9127929690445118, 2.285997311953778]
+big_sd = [0.0067524593881819811, 0.013627757094028092]
+big_se_mean = [0.25548159281825489, 0.26565386635049071]
+big_se_sd = [0.022910528179041562, 0.017798388112324964]
+big_netsize_adj = 1.3951136245539719
+big_ppopsize = 508
+big_n_fits = 6
+big_n_failed = 0
